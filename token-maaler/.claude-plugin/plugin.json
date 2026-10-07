@@ -1,6 +1,6 @@
 {
   "name": "token-maaler",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "Viser hvad projektet, hver opgave og hver dag kostede i tokens og penge, og giver råd til at bruge færre",
   "types": "./types/index.d.ts",
   "userConfig": {
@@ -26,6 +26,12 @@
       "type": "boolean",
       "title": "Beskrivelser af opgaver",
       "description": "Lad Claude Haiku skrive en kort beskrivelse af hver opgave i /tokens. Sender korte uddrag af samtalen og koster under en øre pr. opgave.",
+      "default": true
+    },
+    "promptsmart": {
+      "type": "boolean",
+      "title": "PromptSMART",
+      "description": "Vis knappen PromptSMART ved siden af Indsigt. Når du trykker, analyserer Claude Opus dine dyreste samtaler, Claude Sonnet skriver bedre første prompts, og Claude Haiku skriver forklaringerne. Sender uddrag af samtalerne; prisen står under resultatet.",
       "default": true
     }
   }

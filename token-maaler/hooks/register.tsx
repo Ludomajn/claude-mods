@@ -4,10 +4,25 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { KontekstDel } from '../types'
 import { afkort, analyser, etiket, kontekstDele, opsummering } from './analyse'
 import type { Agent, Kald, Trin } from './analyse'
-import { beskrivelsesPrompt, dagTekst, dageTekst, laesLinje, nySamling, opgaveTekst, projekt, projektTekst, renBeskrivelse, visteOpgaver } from './historik'
-import type { HistOpgave, Kilde, Projekt, Samling } from './historik'
+import { beskrivelsesPrompt, dagTekst, dageTekst, kaldUsd, laesLinje, nySamling, opgaveTekst, projekt, projektTekst, renBeskrivelse, visteOpgaver } from './historik'
+import type { Brug, HistOpgave, Kilde, Projekt, Samling } from './historik'
 import { indsigtTekst } from './indsigt'
 import type { Resume } from './indsigt'
+import {
+  ANALYSE_SYSTEM,
+  analysePrompt,
+  ARBEJDE_SYSTEM,
+  arbejdePrompt,
+  kaederFra,
+  KOMMUNIKATION_SYSTEM,
+  kommunikationPrompt,
+  MODEL,
+  PRISMODEL,
+  promptsmartTekst,
+  punkterFra,
+  renPrompt,
+} from './promptsmart'
+import type { PromptRaad, Rolle, Udgift } from './promptsmart'
 import { beloeb, kortRaad, overheadFra, raad, raadTekst, REGLER } from './raad'
 import type { Grundlag, Overhead, Raad } from './raad'
 
@@ -26,10 +41,14 @@ const FIRE_MB = 4 * 1024 * 1024
 // Hver samtales resume i $.store; hæv versionen, når reglerne eller resumeet ændres.
 const INDSIGT = 'indsigt:v3:'
 const HENTER = 'Samler indsigt fra alle samtaler …'
+// Hver samtales PromptSMART-forslag i $.store; hæv versionen, når prompterne til modellerne ændres.
+const PROMPTSMART = 'promptsmart:v2:'
+// PromptSMART gennemgår de dyreste samtaler, fordi rettelser dér koster mest.
+const PROMPTSMART_SAMTALER = 8
 
 // Indstillingerne fra /config (plugin.json `userConfig`); en ændring dér indlæser modulet igen.
-type Indstillinger = { velkomst: boolean; baand: boolean; beskeder: boolean; beskrivelser: boolean }
-let indstillinger: Indstillinger = { velkomst: true, baand: true, beskeder: true, beskrivelser: true }
+type Indstillinger = { velkomst: boolean; baand: boolean; beskeder: boolean; beskrivelser: boolean; promptsmart: boolean }
+let indstillinger: Indstillinger = { velkomst: true, baand: true, beskeder: true, beskrivelser: true, promptsmart: true }
 
 const HISTORIK_BESKRIVELSE =
   "Token usage and cost of this project (this Claude Code session) across its whole history, read from its transcript files: total tokens and cost, every task (each message the user wrote) with its number, day and cost, the active days, and for one task what its cost went to (re-reading the conversation, tool results, thinking, subagents). Use it to answer questions such as 'what did task 7 cost?', 'what did day 2 cost?', 'which tasks were most expensive?' or 'how many days have we worked on this?'. With `alle` it covers all of the user's sessions in all projects instead. Amounts are list prices. Without arguments it returns the project overview and the days."
@@ -46,7 +65,7 @@ type Igang = Spand & {
   kontekst: Promise<KontekstDel[]>
 }
 
-type Visning = 'projekt' | 'opgave' | 'dage' | 'raad' | 'alle'
+type Visning = 'projekt' | 'opgave' | 'dage' | 'raad' | 'alle' | 'promptsmart'
 
 const forbrug = async ($: EngineInterface) => {
   try {
@@ -332,6 +351,124 @@ const indsigtFor = async ($: EngineInterface, visuel: boolean): Promise<string[]
   }
 }
 
+// Ét modelkald i PromptSMART; prisen lægges til `udgift` under modellens rolle.
+const spoerg = async ($: EngineInterface, rolle: Rolle, udgift: Udgift, system: string, prompt: string): Promise<string> => {
+  const indstilling = {
+    analyse: { effort: 'high', maxTokens: 8_000, timeoutMs: 240_000 },
+    arbejde: { effort: 'medium', maxTokens: 2_000, timeoutMs: 120_000 },
+    kommunikation: { effort: 'low', maxTokens: 800, timeoutMs: 60_000 },
+  } as const
+  const svar = await $.model.complete({ model: MODEL[rolle], system, prompt, ...indstilling[rolle] })
+  udgift[rolle] += kaldUsd(PRISMODEL[rolle], (svar.usage ?? {}) as Brug)
+  if (svar.isAnswered) return svar.text
+  throw new ModelFejl(`${MODEL[rolle]}: ${svar.reason === 'api-error' ? `${svar.error ?? 'API-fejl'}` : svar.reason}`)
+}
+
+// Et modelkald uden svar; samtalen gemmes så ikke, og grunden vises under resultatet.
+class ModelFejl extends Error {}
+
+type Fremgang = { samtaler: number; analyseret: number; skrevet: number }
+
+// Én samtale gennem alle tre modeller. Forslagene gemmes, til samtalen får nye beskeder.
+const promptsmartSamtale = async ($: EngineInterface, p: Projekt, udgift: Udgift, fremgang: Fremgang, vis: () => Promise<void>): Promise<PromptRaad[]> => {
+  const noegle = `${PROMPTSMART}${p.id}`
+  const signatur = `${p.opgaver.length}:${p.opgaver.at(-1)?.t ?? 0}`
+  const gemt = (await $.store.get(noegle)) as { signatur?: unknown; raad?: PromptRaad[] } | undefined
+  if (gemt?.signatur === signatur && Array.isArray(gemt.raad)) {
+    fremgang.analyseret += 1
+    await vis()
+    return gemt.raad
+  }
+  const titel = p.titel || p.opgaver[0]?.tekst || 'Uden titel'
+  const kaeder = kaederFra(await spoerg($, 'analyse', udgift, ANALYSE_SYSTEM, analysePrompt(titel, p.opgaver)), p.opgaver)
+  fremgang.analyseret += 1
+  await vis()
+  const fuld = (nr: number) => p.opgaver.find(o => o.nr === nr)?.fuld ?? ''
+  const forslag = await Promise.all(
+    kaeder.map(async k => {
+      const proev = renPrompt(
+        await spoerg($, 'arbejde', udgift, ARBEJDE_SYSTEM, arbejdePrompt(fuld(k.start), k.rettelser.map(fuld), k)).catch(() => ''),
+      )
+      fremgang.skrevet += 1
+      await vis()
+      return { k, proev }
+    }),
+  )
+  const brugbare = forslag.filter(f => f.proev !== '')
+  const punkter = brugbare.length
+    ? punkterFra(
+        await spoerg($, 'kommunikation', udgift, KOMMUNIKATION_SYSTEM, kommunikationPrompt(brugbare.map(f => ({ foerste: fuld(f.k.start), manglede: f.k.manglede })))).catch(
+          () => '',
+        ),
+        brugbare.length,
+      )
+    : []
+  const raad = brugbare.map(({ k, proev }, i): PromptRaad => ({
+    samtale: titel,
+    navn: punkter[i]?.navn ?? afkort(fuld(k.start), 30),
+    manglede: punkter[i]?.manglede ?? k.manglede,
+    skrev: fuld(k.start),
+    proev,
+    usd: p.opgaver.filter(o => k.rettelser.includes(o.nr)).reduce((n, o) => n + o.usd, 0),
+  }))
+  // Kun en hel gennemgang gemmes; manglede en prompt eller en forklaring, prøves samtalen igen næste gang.
+  if (brugbare.length === kaeder.length && punkter.every(Boolean)) await $.store.set(noegle, { signatur, raad })
+  return raad
+}
+
+let promptsmartIgang: Promise<string[]> | null = null
+
+// PromptSMART på tværs af de dyreste samtaler. `vis` får fremgangen, mens modellerne arbejder.
+const promptsmartFor = (
+  $: EngineInterface,
+  visuel: boolean,
+  vis: (linjer: string[]) => Promise<void> = async () => {},
+): Promise<string[]> => {
+  promptsmartIgang ??= (async () => {
+    try {
+      const egen = await $.session.id()
+      const resumeer: { s: Awaited<ReturnType<typeof alleSessioner>>[number]; usd: number }[] = []
+      for (const s of await alleSessioner($)) {
+        const r = await resumeFor($, s, egen).catch(() => null)
+        if (r && r.usd > 0) resumeer.push({ s, usd: r.usd })
+      }
+      const valgte = resumeer.sort((a, b) => b.usd - a.usd).slice(0, PROMPTSMART_SAMTALER)
+      const udgift: Udgift = { analyse: 0, arbejde: 0, kommunikation: 0 }
+      const fremgang: Fremgang = { samtaler: valgte.length, analyseret: 0, skrevet: 0 }
+      const visFremgang = () =>
+        vis([
+          '**PromptSMART**',
+          `Opus analyserer: ${fremgang.analyseret} af ${fremgang.samtaler} samtaler`,
+          `Sonnet skriver bedre prompts: ${fremgang.skrevet} skrevet`,
+          'Haiku skriver forklaringerne til sidst.',
+        ])
+      await visFremgang()
+      const fejl: string[] = []
+      const alle = await Promise.all(
+        valgte.map(async ({ s }) => {
+          try {
+            const p = await laesSession($, s.mappe, s.id, s.id === egen)
+            if (!p) return []
+            const titel = p.titel || (await titelFra($, s.mappe, s.id))
+            return await promptsmartSamtale($, { ...p, titel }, udgift, fremgang, visFremgang)
+          } catch (f) {
+            fejl.push(f instanceof Error ? f.message : String(f))
+            return []
+          }
+        }),
+      )
+      if (fejl.length === valgte.length && fejl.length > 0) return [`PromptSMART fik ikke svar fra modellerne (${fejl[0]}). Prøv igen om lidt.`]
+      const linjer = promptsmartTekst(alle.flat(), valgte.length - fejl.length, udgift, visuel)
+      return fejl.length ? [...linjer, `${fejl.length === 1 ? '1 samtale' : `${fejl.length} samtaler`} kunne ikke gennemgås (${fejl[0]}).`] : linjer
+    } catch (fejl) {
+      return [`PromptSMART kunne ikke gennemgå samtalerne: ${fejl instanceof Error ? fejl.message : String(fejl)}`]
+    } finally {
+      promptsmartIgang = null
+    }
+  })()
+  return promptsmartIgang
+}
+
 // Efter hver opgave: er der et nyt råd (eller er et gammelt blevet dobbelt så stort), vises det én gang.
 const tjekRaad = async ($: EngineInterface) => {
   try {
@@ -369,6 +506,14 @@ const tekstFor = async ($: EngineInterface, p: Projekt, visning: Visning | 'dag'
 
 // Panelet viser samme tekst som kommandoerne; den beregnes, når en knap trykkes.
 const visPanel = async ($: EngineInterface, visning: Visning, nr: number | null) => {
+  if (visning === 'promptsmart') {
+    await update($, paneVisning, () => visning)
+    const linjer = await promptsmartFor($, true, async l => {
+      await update($, paneLinjer, () => l)
+    })
+    await update($, paneLinjer, () => linjer)
+    return
+  }
   if (visning === 'alle') {
     // Første gang tager det nogle sekunder at læse alle samtaler; så længe står der, at den henter.
     await update($, paneLinjer, () => [HENTER])
@@ -398,6 +543,12 @@ const visIndsigt = async ($: EngineInterface) => {
   await klar
 }
 
+const visPromptsmart = async ($: EngineInterface) => {
+  const klar = visPanel($, 'promptsmart', null)
+  await aabnPanel($, '/tokens promptsmart')
+  await klar
+}
+
 // Lidt efter sessionens start samles resumeerne, så Indsigt svarer med det samme.
 const forvarm = async ($: EngineInterface) => {
   await indsigtFor($, false)
@@ -409,6 +560,7 @@ export const register: Register = (on, options) => {
     baand: options.baand !== false,
     beskeder: options.beskeder !== false,
     beskrivelser: options.beskrivelser !== false,
+    promptsmart: options.promptsmart !== false,
   }
   let aktiv: Igang | null = null
   // Subagenter i baggrunden kan blive færdige mellem to opgaver; deres forbrug går til den næste.
@@ -420,7 +572,13 @@ export const register: Register = (on, options) => {
   const spand = (): Spand => aktiv ?? ventende
 
   on('session.start', async ($, e, next) => {
-    await $.command.register({ name: 'tokens', description: 'Projektet: /tokens · én opgave: /tokens <nr> · dage: /tokens dage · råd: /tokens råd · alle samtaler: /tokens råd alle' })
+    await $.command.register({
+      name: 'tokens',
+      description: 'Projektet: /tokens · én opgave: /tokens <nr> · dage: /tokens dage · råd: /tokens råd · alle samtaler: /tokens råd alle · bedre prompts: /tokens promptsmart',
+    })
+    if (indstillinger.promptsmart) {
+      await $.command.register({ name: 'promptsmart', description: 'Bedre første prompts ud fra det, du endte med at ville have (Opus analyserer, Sonnet skriver, Haiku forklarer)' })
+    }
     try {
       await $.tool.register({
         name: 'historik',
@@ -565,6 +723,7 @@ export const register: Register = (on, options) => {
     const ord = e.args.trim().split(/\s+/).filter(Boolean)
     const [foerste = '', ...rest] = ord
     await update($, skjult, () => false)
+    if (foerste.toLowerCase() === 'promptsmart') return { text: (await promptsmartFor($, true)).join('\n') }
     if (((foerste === 'råd' || foerste === 'raad') && rest.join(' ') === 'alle') || foerste === 'indsigt') {
       return { text: (await indsigtFor($, true)).join('\n') }
     }
@@ -586,6 +745,8 @@ export const register: Register = (on, options) => {
     return { text: typeof p === 'string' ? p : (await tekstFor($, p, visning, nr, true)).join('\n') }
   })
 
+  on('command.run', { command: 'promptsmart' }, async $ => ({ text: (await promptsmartFor($, true)).join('\n') }))
+
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
     const sidste = (await read($, opgaver)).at(-1)
@@ -598,6 +759,7 @@ export const register: Register = (on, options) => {
         <Box>
           <Text dimColor>Bliv klogere på dit Claude forbrug </Text>
           <Button key="indsigt" label="Indsigt" onPress={() => visIndsigt($)} />
+          {indstillinger.promptsmart && <Button key="promptsmart" label="PromptSMART" onPress={() => visPromptsmart($)} />}
           <Button key="skjul" label="Skjul" onPress={() => update($, velkomstSkjult, () => true)} />
         </Box>
       )
@@ -681,6 +843,7 @@ export const register: Register = (on, options) => {
           <Button key="dage" label="Dage" onPress={() => visPanel($, 'dage', null)} />
           <Button key="raad" label="Råd" onPress={() => visPanel($, 'raad', null)} />
           <Button key="indsigt" label="Indsigt" onPress={() => visPanel($, 'alle', null)} />
+          {indstillinger.promptsmart && <Button key="promptsmart" label="PromptSMART" onPress={() => visPanel($, 'promptsmart', null)} />}
           {visning === 'opgave' && nr !== null && nr > 1 && (
             <Button key="forrige" label="‹ Forrige" onPress={() => visPanel($, 'opgave', nr - 1)} />
           )}

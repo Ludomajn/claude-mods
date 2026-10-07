@@ -48,7 +48,7 @@ declare module 'claude-code' {
       opgaver: Opgave[]
       skjult: boolean
       velkomstSkjult: boolean
-      paneVisning: 'projekt' | 'opgave' | 'dage' | 'raad' | 'alle'
+      paneVisning: 'projekt' | 'opgave' | 'dage' | 'raad' | 'alle' | 'promptsmart'
       paneNr: number | null
       paneAntal: number
       paneLinjer: string[]
