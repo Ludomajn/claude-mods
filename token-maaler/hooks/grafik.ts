@@ -68,19 +68,19 @@ const graenseTooltip = (g: Graense, nu: number) => {
 // Målerne til båndet: to små bjælker på én linje, lige så høje som teksten.
 export const maalerSvgLille = (graenser: readonly Graense[], nu: number): Tegning => {
   const vist = vistGraenser(graenser)
-  const bred = 118
+  const bred = 160
   const dele = vist.map((g, i) => {
     const x = i * bred
     const p = brugt(g, nu)
-    const w = Math.max(p > 0 ? 2 : 0, Math.min(100, p) * 0.5)
+    const w = Math.max(p > 0 ? 2 : 0, Math.min(100, p) * 0.6)
     return [
-      `<text x="${x}" y="12" fill="${TEKST}" font-size="11" ${SKRIFT}>${xml(NAVN[g.kind]?.kort ?? g.kind)}</text>`,
-      `<rect x="${x + 26}" y="5" width="50" height="6" rx="3" fill="${SPOR}"/>`,
-      `<rect x="${x + 26}" y="5" width="${w.toFixed(1)}" height="6" rx="3" fill="${fyld(p)}"/>`,
-      `<text x="${x + 81}" y="12" fill="${TEKST}" font-size="11" ${SKRIFT}>${pct(p)}</text>`,
+      `<text x="${x}" y="14" fill="${TEKST}" font-size="13" ${SKRIFT}>${xml(NAVN[g.kind]?.kort ?? g.kind)}</text>`,
+      `<rect x="${x + 34}" y="6" width="60" height="7" rx="3.5" fill="${SPOR}"/>`,
+      `<rect x="${x + 34}" y="6" width="${w.toFixed(1)}" height="7" rx="3.5" fill="${fyld(p)}"/>`,
+      `<text x="${x + 102}" y="14" fill="${TEKST}" font-size="13" ${SKRIFT}>${pct(p)}</text>`,
     ].join('')
   })
-  return svg(Math.max(1, vist.length * bred - 6), 16, dele.join(''))
+  return svg(Math.max(1, vist.length * bred - 20), 18, dele.join(''))
 }
 
 // Målerne til panelet: én række pr. grænse med hvornår den nulstilles.

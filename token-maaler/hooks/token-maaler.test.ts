@@ -97,7 +97,7 @@ test('en live-målt opgave vises i båndet og som besked', async ($, on) => {
 
   for (const surface of ['terminal', 'desktop'] as const) {
     const baand = await $.ui.mount({ plugin: 'token-maaler', surface, component: 'AbovePrompt', props: baandProps } as never)
-    expect((await baand.find({ type: 'Text', text: /^Sidste opgave: 1,95 kr $/ }))?.type).toBe('Text')
+    expect((await baand.find({ type: 'Text', text: /^Sidste opgave: 1,95 kr$/ }))?.type).toBe('Text')
     expect(await baand.find({ key: 'detaljer' })).toBeDefined()
     expect((await baand.find({ key: 'raad' }))?.props.label).toBe('Råd')
     expect(await baand.find({ key: 'projekt' })).toBeUndefined()
@@ -467,7 +467,7 @@ test('båndet viser 5-timersgrænsen og ugens grænse som målere: en graf på d
   const svg = await desktop.find({ type: 'Svg' })
   expect(String(svg?.props.source)).toContain('<svg')
   // Tegnet i sin egen størrelse, så den ikke skaleres op, og uden en hvid ramme.
-  expect([svg?.props.height, svg?.props.isInteractive]).toEqual([16, undefined])
+  expect([svg?.props.height, svg?.props.isInteractive]).toEqual([18, undefined])
   expect(String(svg?.props.alt)).toMatch(/^5 t ██░+ 23 % \(nulstilles .+\)  ·  Uge █░+ 8 % \(nulstilles .+\)$/)
   await desktop.unmount()
 

@@ -919,8 +919,8 @@ export const register: Register = (on, options) => {
     if (!sidste) {
       if (!indstillinger.velkomst || (await read($, velkomstSkjult))) return next(e)
       return (
-        <Box alignItems="center">
-          <Text dimColor>Bliv klogere på dit forbrug og dine prompts </Text>
+        <Box alignItems="center" gap={1}>
+          <Text dimColor>Bliv klogere på dit forbrug og dine prompts</Text>
           <Button key="indsigt" label="Indsigt" onPress={() => visIndsigt($)} />
           {indstillinger.promptsmart && <Button key="promptsmart" label="Dine prompts" onPress={() => visPromptsmart($)} />}
           <Button key="skjul" label="Skjul" onPress={() => update($, velkomstSkjult, () => true)} />
@@ -932,8 +932,8 @@ export const register: Register = (on, options) => {
     const raadAntal = (await read($, raadListe)).length
 
     return (
-      <Box alignItems="center">
-        <Text dimColor>Sidste opgave: {sidste.usd !== null ? graenseForbrug(sidste.usd) : `${fmt(sidste.ind + sidste.ud)} tokens`} </Text>
+      <Box alignItems="center" gap={1}>
+        <Text dimColor>Sidste opgave: {sidste.usd !== null ? graenseForbrug(sidste.usd) : `${fmt(sidste.ind + sidste.ud)} tokens`}</Text>
         <Button
           key="detaljer"
           label="Detaljer"
