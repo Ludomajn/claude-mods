@@ -1,0 +1,15 @@
+{
+  "name": "claude-mods",
+  "description": "Mods til Claude Code",
+  "owner": {
+    "name": "Ludomajn"
+  },
+  "plugins": [
+    {
+      "name": "token-maaler",
+      "source": "./token-maaler",
+      "description": "Viser hvad hver opgave og hver dag kostede i tokens og penge, og hvorfor",
+      "version": "0.3.0"
+    }
+  ]
+}

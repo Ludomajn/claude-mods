@@ -1,0 +1,1 @@
+{ "name": "token-maaler", "version": "0.3.0", "description": "Viser hvad hver opgave og hver dag kostede i tokens og penge, og hvorfor", "types": "./types/index.d.ts" }

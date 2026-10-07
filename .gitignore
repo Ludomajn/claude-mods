@@ -1,0 +1,6 @@
+# Zip-filer til deling bygges ud fra mapperne.
+*.zip
+.DS_Store
+# Claude Code lægger selv typefiler og tsconfig ind i hver mod; de lister også ens egne forbundne værktøjer.
+*/.claude-plugin/types/
+*/tsconfig.json
