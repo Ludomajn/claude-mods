@@ -439,8 +439,8 @@ const promptsmartFor = (
         vis([
           '**PromptSMART**',
           `Analyserer: ${fremgang.analyseret} af ${fremgang.samtaler} samtaler`,
-          `Forbedrer: ${fremgang.skrevet === 1 ? '1 prompt' : `${fremgang.skrevet} prompts`}`,
-          `Klargør: ${fremgang.klargjort} af ${fremgang.samtaler} samtaler`,
+          `Forklarer: ${fremgang.skrevet === 1 ? '1 prompt' : `${fremgang.skrevet} prompts`}`,
+          `Færdiggør: ${fremgang.klargjort} af ${fremgang.samtaler} samtaler`,
         ])
       await visFremgang()
       const fejl: string[] = []
