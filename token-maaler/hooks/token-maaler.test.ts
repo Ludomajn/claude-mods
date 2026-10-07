@@ -101,7 +101,7 @@ test('en live-målt opgave vises i båndet og som besked', async ($, on) => {
     expect(await baand.find({ key: 'detaljer' })).toBeDefined()
     expect((await baand.find({ key: 'raad' }))?.props.label).toBe('Råd')
     expect(await baand.find({ key: 'projekt' })).toBeUndefined()
-    await baand.press({ key: 'forbrug' })
+    await baand.press({ key: 'indsigt' })
     await baand.unmount()
   }
   expect(aabnet).toEqual(['token-maaler', 'token-maaler'])
@@ -166,8 +166,10 @@ test('/tokens råd alle samler alle samtaler i alle projektmapper og husker resu
 
   const tekst = (await $.command.run({ command: 'tokens', args: 'råd alle' } as never)).text ?? ''
   const linjer = tekst.split('\n')
-  expect(linjer.slice(0, 8)).toEqual([
-    '**Indsigt i dit Claude-forbrug**',
+  // Indsigt: ugens grafer først, så alle samtaler med rådene på tværs.
+  expect(linjer[0]).toBe('**Indsigt**')
+  expect(linjer.slice(linjer.indexOf('**Alle samtaler**'), linjer.indexOf('**Alle samtaler**') + 8)).toEqual([
+    '**Alle samtaler**',
     expect.stringMatching(/^2 samtaler · 3 aktive dage · \d+,\d+ kr i alt$/),
     '',
     '**Råd på tværs** · tal = kroner, du cirka kunne have sparet',
@@ -196,7 +198,7 @@ test('/tokens råd alle samler alle samtaler i alle projektmapper og husker resu
   expect(aabnet).toEqual(['token-maaler'])
   const panel = await $.ui.mount({ plugin: 'token-maaler', surface: 'desktop', component: 'Pane', requestId: 'token-maaler', props: panelProps } as never)
   // Overskriften er fed, forklaringen under et råd dæmpet, handlingen grøn og kommandoen i farve.
-  expect((await panel.find({ type: 'Text', text: /^Indsigt i dit Claude-forbrug$/ }))?.props.bold).toBe(true)
+  expect((await panel.find({ type: 'Text', text: /^Alle samtaler$/ }))?.props.bold).toBe(true)
   expect((await panel.find({ type: 'Text', text: /^I Bæverspil/ }))?.props.dimColor).toBe(true)
   expect((await panel.find({ type: 'Text', text: /^→ Skriv / }))?.props.color).toBe('green')
   expect((await panel.find({ type: 'Text', text: /^\/compact$/ }))?.props.color).toBe('cyan')
@@ -279,7 +281,7 @@ test('historikken: /tokens viser projektet, /tokens <nr> en opgave, og panelet o
 
   const panel = await $.ui.mount({ plugin: 'token-maaler', surface: 'desktop', component: 'Pane', requestId: 'token-maaler', props: panelProps } as never)
   expect(await panel.find({ key: 'projekt' })).toBeUndefined()
-  await panel.press({ key: 'forbrug' })
+  await panel.press({ key: 'indsigt' })
   // Forbrug: graferne øverst og ugens dyreste samtaler under dem.
   expect((await panel.find({ type: 'Text', text: /^Ugen pr\. dag$/ }))?.props.bold).toBe(true)
   // Uden målte grænser er der kun søjlerne for ugen; den seneste opgave vises ikke her.
@@ -442,10 +444,11 @@ test('grænserne måles ud fra forbruget i deres vinduer, og så står tallene s
   for (let i = 0; i < 50 && !(await kalibreret()); i++) await vent(10)
 
   const linjer = ((await $.command.run({ command: 'tokens', args: 'råd alle' } as never)).text ?? '').split('\n')
-  expect(linjer[3]).toBe('**Råd på tværs** · tal = andel af ugens grænse, du cirka kunne have sparet')
+  const alle = linjer.slice(linjer.indexOf('**Alle samtaler**'))
+  expect(alle[3]).toBe('**Råd på tværs** · tal = andel af ugens grænse, du cirka kunne have sparet')
   // $0.675 sparet ÷ $0.082 pr. procentpoint ≈ 8,2 % af ugen.
-  expect(linjer[5]).toBe('██████████ **8,2 % af ugen · Lang samtale** · 1 samtale')
-  expect(linjer[1]).toMatch(/^2 samtaler · 3 aktive dage · \d+ % af ugen \(\d+,\d+ kr\) i alt$/)
+  expect(alle[5]).toBe('██████████ **8,2 % af ugen · Lang samtale** · 1 samtale')
+  expect(alle[1]).toMatch(/^2 samtaler · 3 aktive dage · \d+ % af ugen \(\d+,\d+ kr\) i alt$/)
 })
 
 test('båndet viser 5-timersgrænsen og ugens grænse som målere: en graf på desktop, tekst i terminalen', async ($, on) => {
@@ -477,7 +480,7 @@ test('båndet viser 5-timersgrænsen og ugens grænse som målere: en graf på d
   await terminal.unmount()
 
   const tekst = (await $.command.run({ command: 'tokens', args: 'forbrug' } as never)).text ?? ''
-  expect(tekst.split('\n').slice(0, 4)).toEqual(['**Forbrug**', expect.stringMatching(/^5 t ██░+ 23 %/), '', '**Ugen pr. dag** · de seneste 7 dage · alle samtaler'])
+  expect(tekst.split('\n').slice(0, 4)).toEqual(['**Indsigt**', expect.stringMatching(/^5 t ██░+ 23 %/), '', '**Ugen pr. dag** · de seneste 7 dage · alle samtaler'])
 })
 
 test('Forbrug gælder alle samtaler: ugen pr. dag og ugens dyreste samtaler på tværs af projektmapper', async ($, on) => {
@@ -509,5 +512,5 @@ test('Forbrug følger ugens grænse: dagene siden den sidst blev nulstillet', as
   const linjer = ((await $.command.run({ command: 'tokens', args: 'forbrug' } as never)).text ?? '').split('\n')
   expect(linjer[3]).toMatch(/^\*\*Ugen pr\. dag\*\* · siden søn kl\. \d\d:00 · alle samtaler$/)
   expect(linjer.find(l => l.startsWith('I alt'))).toMatch(/^I alt siden søn kl\. \d\d:00: /)
-  expect(linjer.filter(l => /^[█░]{10} /.test(l))).toHaveLength(6 + 2)
+  expect(linjer.slice(0, linjer.indexOf('**Alle samtaler**')).filter(l => /^[█░]{10} /.test(l))).toHaveLength(6 + 2)
 })

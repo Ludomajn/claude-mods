@@ -50,7 +50,7 @@ export const indsigtTekst = (liste: readonly Resume[], ekstra: readonly Raad[] =
   if (liste.length === 0) return ['Ingen samtaler med forbrug endnu.']
   const dage = new Set(liste.flatMap(s => s.dage)).size
   const ud = [
-    '**Indsigt i dit Claude-forbrug**',
+    '**Alle samtaler**',
     `${samtaler(liste.length)} · ${dage === 1 ? '1 aktiv dag' : `${dage} aktive dage`} · ${maalKr(sum(liste, s => s.usd))} i alt`,
     '',
     `**Råd på tværs** · tal = ${maalForklaring()}, du cirka kunne have sparet`,

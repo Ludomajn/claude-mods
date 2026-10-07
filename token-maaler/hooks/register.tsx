@@ -567,29 +567,36 @@ const forbrugFor = async ($: EngineInterface, visuel = true): Promise<{ grafik: 
   return { grafik: { dage, periode }, linjer: ugensSamtalerTekst(samtaler, periode, visuel) }
 }
 
-// Forbrug som tekst, til terminalen og /tokens forbrug.
+// Indsigt som tekst, til terminalen og /tokens indsigt: forbruget i ugen og rådene på tværs.
 const forbrugTekst = async ($: EngineInterface): Promise<string[]> => {
+  const indsigt = await indsigtFor($, true)
   const { grafik, linjer } = await forbrugFor($)
   const g = await read($, graenser)
   const nu = await $.clock.now()
   return [
-    '**Forbrug**',
+    '**Indsigt**',
     vistGraenser(g).length ? maalerTekst(g, nu) : 'Grænserne vises, når Claude har svaret første gang.',
     '',
     `**Ugen pr. dag** · ${grafik.periode} · alle samtaler`,
     ...soejlerTekst(grafik.dage),
     '',
     ...linjer,
+    '',
+    ...indsigt,
   ]
 }
 
 // Panelet viser samme tekst som kommandoerne; den beregnes, når en knap trykkes.
 const visPanel = async ($: EngineInterface, visning: Visning, nr: number | null) => {
-  if (visning === 'forbrug') {
-    await update($, paneVisning, () => visning)
+  // Indsigt: graferne for ugen øverst, så ugens dyreste samtaler og rådene på tværs af alle samtaler.
+  if (visning === 'forbrug' || visning === 'alle') {
+    await update($, paneVisning, () => 'forbrug')
+    // Første gang tager det nogle sekunder at læse alle samtaler; så længe står der, at den henter.
+    await update($, paneLinjer, () => [HENTER])
+    const indsigt = await indsigtFor($, true)
     const { grafik, linjer } = await forbrugFor($)
     await update($, forbrugGrafik, () => grafik)
-    await update($, paneLinjer, () => linjer)
+    await update($, paneLinjer, () => [...linjer, '', ...indsigt])
     return
   }
   if (visning === 'promptsmart') {
@@ -597,14 +604,6 @@ const visPanel = async ($: EngineInterface, visning: Visning, nr: number | null)
     const linjer = await promptsmartFor($, true, async l => {
       await update($, paneLinjer, () => l)
     })
-    await update($, paneLinjer, () => linjer)
-    return
-  }
-  if (visning === 'alle') {
-    // Første gang tager det nogle sekunder at læse alle samtaler; så længe står der, at den henter.
-    await update($, paneLinjer, () => [HENTER])
-    await update($, paneVisning, () => visning)
-    const linjer = await indsigtFor($, true)
     await update($, paneLinjer, () => linjer)
     return
   }
@@ -624,8 +623,8 @@ const aabnPanel = async ($: EngineInterface, kommando: string) => {
 
 // Panelet åbnes med det samme og fyldes, når indsigten er samlet.
 const visIndsigt = async ($: EngineInterface) => {
-  const klar = visPanel($, 'alle', null)
-  await aabnPanel($, '/tokens råd alle')
+  const klar = visPanel($, 'forbrug', null)
+  await aabnPanel($, '/tokens indsigt')
   await klar
 }
 
@@ -869,11 +868,10 @@ export const register: Register = (on, options) => {
     const ord = e.args.trim().split(/\s+/).filter(Boolean)
     const [foerste = '', ...rest] = ord
     await update($, skjult, () => false)
-    if (foerste === 'forbrug') return { text: (await forbrugTekst($)).join('\n') }
-    if (['prompts', 'promptsmart'].includes(foerste.toLowerCase())) return { text: (await promptsmartFor($, true)).join('\n') }
-    if (((foerste === 'råd' || foerste === 'raad') && rest.join(' ') === 'alle') || foerste === 'indsigt') {
-      return { text: (await indsigtFor($, true)).join('\n') }
+    if (foerste === 'forbrug' || foerste === 'indsigt' || ((foerste === 'råd' || foerste === 'raad') && rest.join(' ') === 'alle')) {
+      return { text: (await forbrugTekst($)).join('\n') }
     }
+    if (['prompts', 'promptsmart'].includes(foerste.toLowerCase())) return { text: (await promptsmartFor($, true)).join('\n') }
     if (foerste === 'dag') {
       const nr = Number.parseInt(rest[0] ?? '', 10)
       if (Number.isNaN(nr)) return { text: 'Skriv fx /tokens dag 2.' }
@@ -904,27 +902,25 @@ export const register: Register = (on, options) => {
     // Målerne for 5-timersgrænsen og ugens grænse efter knapperne: en lille graf, i terminalen som tekst.
     const maaler =
       vistGraenser(g).length === 0 ? null : 'Svg' in el && e.surface !== 'terminal' ? (
-        <Box marginLeft={2}>
+        <Box marginLeft={1}>
           <el.Svg {...maalerSvgLille(g, nu)} alt={maalerTekst(g, nu)} />
         </Box>
       ) : (
         <Text dimColor> {maalerTekst(g, nu)}</Text>
       )
-    const visForbrug = async () => {
-      await visPanel($, 'forbrug', null)
-      await aabnPanel($, '/tokens forbrug')
-    }
 
     // En ny samtale, før den første opgave er målt: en indgang til indsigten i hele forbruget.
     if (!sidste) {
       if (!indstillinger.velkomst || (await read($, velkomstSkjult))) return next(e)
       return (
-        <Box alignItems="center" gap={1}>
+        <Box alignItems="center" justifyContent="space-between" width="100%">
           <Text dimColor>Bliv klogere på dit forbrug og dine prompts</Text>
-          <Button key="indsigt" label="Indsigt" onPress={() => visIndsigt($)} />
-          {indstillinger.promptsmart && <Button key="promptsmart" label="Dine prompts" onPress={() => visPromptsmart($)} />}
-          <Button key="skjul" label="Skjul" onPress={() => update($, velkomstSkjult, () => true)} />
-          {maaler}
+          <Box alignItems="center" gap={1}>
+            <Button key="indsigt" label="Indsigt" onPress={() => visIndsigt($)} />
+            {indstillinger.promptsmart && <Button key="promptsmart" label="Dine prompts" onPress={() => visPromptsmart($)} />}
+            <Button key="skjul" label="Skjul" onPress={() => update($, velkomstSkjult, () => true)} />
+            {maaler}
+          </Box>
         </Box>
       )
     }
@@ -932,27 +928,29 @@ export const register: Register = (on, options) => {
     const raadAntal = (await read($, raadListe)).length
 
     return (
-      <Box alignItems="center" gap={1}>
+      <Box alignItems="center" justifyContent="space-between" width="100%">
         <Text dimColor>Sidste opgave: {sidste.usd !== null ? graenseForbrug(sidste.usd) : `${fmt(sidste.ind + sidste.ud)} tokens`}</Text>
-        <Button
-          key="detaljer"
-          label="Detaljer"
-          onPress={async () => {
-            await visPanel($, 'opgave', null)
-            await aabnPanel($, '/tokens <nr>')
-          }}
-        />
-        <Button
-          key="raad"
-          label={raadAntal > 0 ? `Råd (${raadAntal})` : 'Råd'}
-          onPress={async () => {
-            await visPanel($, 'raad', null)
-            await aabnPanel($, '/tokens råd')
-          }}
-        />
-        <Button key="forbrug" label="Forbrug" onPress={visForbrug} />
-        <Button key="skjul" label="Skjul" onPress={() => update($, skjult, () => true)} />
-        {maaler}
+        <Box alignItems="center" gap={1}>
+          <Button
+            key="detaljer"
+            label="Detaljer"
+            onPress={async () => {
+              await visPanel($, 'opgave', null)
+              await aabnPanel($, '/tokens <nr>')
+            }}
+          />
+          <Button
+            key="raad"
+            label={raadAntal > 0 ? `Råd (${raadAntal})` : 'Råd'}
+            onPress={async () => {
+              await visPanel($, 'raad', null)
+              await aabnPanel($, '/tokens råd')
+            }}
+          />
+          <Button key="indsigt" label="Indsigt" onPress={() => visIndsigt($)} />
+          <Button key="skjul" label="Skjul" onPress={() => update($, skjult, () => true)} />
+          {maaler}
+        </Box>
       </Box>
     )
   })
@@ -1001,7 +999,7 @@ export const register: Register = (on, options) => {
       <Box flexDirection="column" paddingX={1} paddingY={1}>
         {visning === 'forbrug' && grafik && (
           <Box flexDirection="column" marginBottom={1}>
-            <Text bold>Forbrug</Text>
+            <Text bold>Indsigt</Text>
             <Text dimColor>Dine grænser lige nu</Text>
             {vistGraenser(g).length === 0 ? (
               <Text dimColor>Grænserne vises, når Claude har svaret første gang.</Text>
@@ -1021,12 +1019,11 @@ export const register: Register = (on, options) => {
             )}
           </Box>
         )}
-        {(linjer.length ? linjer : ['Tryk Forbrug for at hente forbruget.']).map(vis)}
+        {(linjer.length ? linjer : ['Tryk Indsigt for at hente forbruget.']).map(vis)}
         <Box marginTop={1} gap={1}>
-          <Button key="forbrug" label="Forbrug" onPress={() => visPanel($, 'forbrug', null)} />
+          <Button key="indsigt" label="Indsigt" onPress={() => visPanel($, 'forbrug', null)} />
           <Button key="dage" label="Dage" onPress={() => visPanel($, 'dage', null)} />
           <Button key="raad" label="Råd" onPress={() => visPanel($, 'raad', null)} />
-          <Button key="indsigt" label="Indsigt" onPress={() => visPanel($, 'alle', null)} />
           {indstillinger.promptsmart && <Button key="promptsmart" label="Dine prompts" onPress={() => visPanel($, 'promptsmart', null)} />}
           {visning === 'opgave' && nr !== null && nr > 1 && (
             <Button key="forrige" label="‹ Forrige" onPress={() => visPanel($, 'opgave', nr - 1)} />
