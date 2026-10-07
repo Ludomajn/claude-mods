@@ -1,7 +1,7 @@
-import type { Del, Graense, Soejle } from '../types'
-import { bjaelke, procent } from './analyse'
+import type { Graense, Soejle } from '../types'
+import { bjaelke } from './analyse'
 
-export type { Del, Graense, Soejle }
+export type { Graense, Soejle }
 
 // Grafer til panelet og båndet som SVG (desktop, mobil og VS Code) og som tekst (terminalen).
 // Farverne er valgt, så de kan læses på både lys og mørk baggrund.
@@ -9,7 +9,6 @@ export type { Del, Graense, Soejle }
 const TEKST = '#8b8b8b'
 const SPOR = 'rgba(128,128,128,0.25)'
 const CYAN = '#22a6c8'
-const FARVER = [CYAN, '#a371f7', '#3fb950', '#d29922', '#f778ba', '#8b8b8b']
 const SKRIFT = 'font-family="system-ui, -apple-system, sans-serif"'
 
 // Tekst til SVG: specialtegn og alt uden for ASCII som tegnreferencer, så æ, ø og å vises ens overalt.
@@ -134,27 +133,3 @@ export const soejlerTekst = (soejler: readonly Soejle[]): string[] => {
   const hoej = Math.max(...soejler.map(s => s.vaerdi), 0)
   return soejler.map(s => `${bjaelke(hoej > 0 ? s.vaerdi / hoej : 0, 10)} ${s.etiket.padEnd(4)} ${s.tal}`)
 }
-
-// Stablet bjælke med en forklaring under: hvad en opgave brugte sit forbrug på.
-export const fordelingSvg = (dele: readonly Del[]): string => {
-  const bred = 600
-  let x = 0
-  const stykker = dele.map((d, i) => {
-    const w = d.andel * bred
-    const s = `<rect x="${x.toFixed(1)}" y="0" width="${Math.max(0, w - 1).toFixed(1)}" height="16" fill="${FARVER[i % FARVER.length]}"><title>${xml(`${d.navn}: ${d.tekst}`)}</title></rect>`
-    x += w
-    return s
-  })
-  const forklaring = dele.map((d, i) => {
-    const y = 34 + i * 20
-    return [
-      `<rect x="0" y="${y - 10}" width="10" height="10" rx="2" fill="${FARVER[i % FARVER.length]}"/>`,
-      `<text x="18" y="${y}" fill="${TEKST}" font-size="12" ${SKRIFT}>${xml(`${d.navn} · ${d.tekst}`)}</text>`,
-    ].join('')
-  })
-  const h = 34 + dele.length * 20
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${bred}" height="${h}" viewBox="0 0 ${bred} ${h}">${stykker.join('')}${forklaring.join('')}</svg>`
-}
-
-export const fordelingTekst = (dele: readonly Del[]): string[] =>
-  dele.map(d => `${bjaelke(d.andel, 10)} ${procent(d.andel).padStart(4)}  ${d.navn} · ${d.tekst}`)

@@ -282,7 +282,9 @@ test('historikken: /tokens viser projektet, /tokens <nr> en opgave, og panelet o
   await panel.press({ key: 'forbrug' })
   // Forbrug: graferne øverst og projektets dyreste opgaver under dem.
   expect((await panel.find({ type: 'Text', text: /^Ugen pr\. dag$/ }))?.props.bold).toBe(true)
-  expect((await panel.findAll({ type: 'Svg' })).length).toBeGreaterThanOrEqual(2)
+  // Uden målte grænser er der kun søjlerne for ugen; den seneste opgave vises ikke her.
+  expect(await panel.findAll({ type: 'Svg' })).toHaveLength(1)
+  expect(await panel.find({ type: 'Text', text: /Seneste opgave/ })).toBeUndefined()
   expect(await panel.find({ type: 'Text', text: /hele projektet/ })).toBeDefined()
   expect((await panel.find({ type: 'Text', text: /^█+$/ }))?.props.color).toBe('cyan')
   await panel.press({ key: 'dage' })

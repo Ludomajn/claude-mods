@@ -1,24 +1,15 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Del, ForbrugGrafik, Graense, KontekstDel, Soejle } from '../types'
-import { afkort, analyser, etiket, fmt, kontekstDele, opsummering, procent } from './analyse'
+import type { ForbrugGrafik, Graense, KontekstDel, Soejle } from '../types'
+import { afkort, analyser, etiket, fmt, kontekstDele, opsummering } from './analyse'
 import type { Agent, Kald, Trin } from './analyse'
 import { beskrivelsesPrompt, dagTekst, dageTekst, datoNoegle, datoTekst, laesLinje, nySamling, opgaveTekst, projekt, projektTekst, renBeskrivelse, visteOpgaver } from './historik'
 import type { HistOpgave, Kilde, Projekt, Samling } from './historik'
 import { indsigtTekst } from './indsigt'
 import type { Resume } from './indsigt'
-import { graenseForbrug, kr, KVARTER, maal, maalKr, median, minutter, opgaveMaal, saetEnhed, VINDUER } from './enhed'
-import {
-  fordelingSvg,
-  fordelingTekst,
-  maalerSvgLille,
-  maalerSvgStor,
-  maalerTekst,
-  soejlerSvg,
-  soejlerTekst,
-  vistGraenser,
-} from './grafik'
+import { graenseForbrug, KVARTER, maal, maalKr, median, minutter, saetEnhed, VINDUER } from './enhed'
+import { maalerSvgLille, maalerSvgStor, maalerTekst, soejlerSvg, soejlerTekst, vistGraenser } from './grafik'
 import type { Maaling } from './enhed'
 import {
   ANALYSE_SYSTEM,
@@ -545,31 +536,11 @@ const ugensDage = async ($: EngineInterface): Promise<Soejle[]> => {
   })
 }
 
-// Hvad den seneste opgave brugte sit forbrug på: målt live, ellers fra transcriptet.
-const senesteFordeling = async ($: EngineInterface, p: Projekt | null): Promise<ForbrugGrafik['fordeling']> => {
-  const live = (await read($, opgaver)).at(-1)
-  const sidste = p?.opgaver.at(-1)
-  const o = live ?? (sidste ? analyser(sidste.raa) : null)
-  if (!o || o.poster.length === 0) return null
-  const top = o.poster.slice(0, 5)
-  const rest = o.poster.slice(5)
-  const del = (navn: string, andel: number, usd: number | null): Del => ({
-    navn: afkort(navn, 40),
-    andel,
-    tekst: `${procent(andel)}${usd !== null ? ` · ${kr(usd)}` : ''}`,
-  })
-  const dele = top.map(x => del(x.navn, x.andel, x.usd))
-  if (rest.length) {
-    dele.push(del('Resten', rest.reduce((s, x) => s + x.andel, 0), o.usd !== null ? rest.reduce((s, x) => s + (x.usd ?? 0), 0) : null))
-  }
-  return { titel: `"${afkort(o.prompt, 50)}"${o.usd !== null ? ` · ${opgaveMaal(o.usd)}` : ''}`, dele }
-}
-
-// Forbrug: grænserne, ugen pr. dag, den seneste opgave og projektets dyreste opgaver.
+// Forbrug: grænserne, ugen pr. dag og projektets dyreste opgaver.
 const forbrugFor = async ($: EngineInterface): Promise<{ grafik: ForbrugGrafik; linjer: string[] }> => {
   const p = await hentProjekt($, '')
   const projekt = typeof p === 'string' ? null : p
-  const grafik: ForbrugGrafik = { dage: await ugensDage($).catch(() => []), fordeling: await senesteFordeling($, projekt) }
+  const grafik: ForbrugGrafik = { dage: await ugensDage($).catch(() => []) }
   const linjer = projekt ? await tekstFor($, projekt, 'projekt', null, true) : [String(p)]
   return { grafik, linjer }
 }
@@ -585,7 +556,6 @@ const forbrugTekst = async ($: EngineInterface): Promise<string[]> => {
     '',
     '**Ugen pr. dag** · alle samtaler',
     ...soejlerTekst(grafik.dage),
-    ...(grafik.fordeling ? ['', `**Seneste opgave** · ${grafik.fordeling.titel}`, ...fordelingTekst(grafik.fordeling.dele)] : []),
     '',
     ...linjer,
   ]
@@ -1027,18 +997,6 @@ export const register: Register = (on, options) => {
             ) : (
               soejlerTekst(grafik.dage).map(l => <Text>{l}</Text>)
             )}
-            {grafik.fordeling && (
-              <Box marginTop={1}>
-                <Text bold>Seneste opgave</Text>
-                <Text dimColor> · {grafik.fordeling.titel}</Text>
-              </Box>
-            )}
-            {grafik.fordeling &&
-              ('Svg' in el && e.surface !== 'terminal' ? (
-                <el.Svg source={fordelingSvg(grafik.fordeling.dele)} alt={fordelingTekst(grafik.fordeling.dele).join('\n')} isInteractive />
-              ) : (
-                fordelingTekst(grafik.fordeling.dele).map(l => <Text>{l}</Text>)
-              ))}
           </Box>
         )}
         {(linjer.length ? linjer : ['Tryk Forbrug for at hente forbruget.']).map(vis)}

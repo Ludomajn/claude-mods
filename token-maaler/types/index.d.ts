@@ -45,12 +45,11 @@ export type Opgave = {
 // En abonnementsgrænse, som Claude Code melder den.
 export type Graense = { kind: string; percentUsed: number; resetsAt?: string }
 
-// Én søjle i et søjlediagram og én del af en stablet bjælke.
+// Én søjle i et søjlediagram.
 export type Soejle = { etiket: string; vaerdi: number; tal: string; tooltip: string }
-export type Del = { navn: string; andel: number; tekst: string }
 
 // Det, Forbrug-visningen tegner ud over teksten.
-export type ForbrugGrafik = { dage: Soejle[]; fordeling: { titel: string; dele: Del[] } | null }
+export type ForbrugGrafik = { dage: Soejle[] }
 
 declare module 'claude-code' {
   interface PluginState {

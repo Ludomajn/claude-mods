@@ -9,7 +9,7 @@
       "name": "token-maaler",
       "source": "./token-maaler",
       "description": "Viser hvad projektet, hver opgave og hver dag kostede i tokens og penge, og giver råd til at bruge færre",
-      "version": "0.11.0"
+      "version": "0.11.1"
     }
   ]
 }
