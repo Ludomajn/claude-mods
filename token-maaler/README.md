@@ -1,13 +1,13 @@
 # Token-måler til Claude Code
 
-Viser, hvad hver opgave og hver dag kostede i tokens og dollars, og hvad der kostede mest.
+Viser, hvad projektet, hver opgave og hver dag kostede i tokens og dollars, og hvad der kostede mest.
 
-- Et bånd over prompten efter hver opgave, med knapperne **Detaljer** og **Dage**.
-- `/tokens` viser den seneste opgave med bjælker og en liste over de andre. `/tokens 3` viser opgave 3.
-- `/tokens dage` viser agentens (sessionens) hele historik: antal aktive dage og prisen for hver dag.
-- `/tokens dag 2` viser dag 2: pris, opgaver, subagenter og dagens dyreste opgaver.
-- `/tokens dage Kundekrigen` viser en anden agent i samme projekt (en del af titlen er nok).
-- Du kan også bare spørge Claude, fx "hvad kostede dag 1?" eller "hvor mange dage har vi arbejdet på det her?".
+- `/tokens` viser hele projektets forbrug: tokens og pris i alt, og opgaverne sorteret efter de dyreste.
+- `/tokens 3` udvider opgave 3: hvad prisen gik til, og hvorfor den blev dyr.
+- `/tokens dage` viser de aktive dage, og `/tokens dag 2` viser dag 2 med dagens dyreste opgaver.
+- `/tokens Kundekrigen` viser en anden session i samme projektmappe (en del af titlen er nok).
+- Efter hver opgave vises et bånd over prompten med knapperne **Detaljer** og **Projekt**.
+- Du kan også spørge Claude, fx "hvad kostede opgave 4?" eller "hvor mange dage har vi arbejdet på det her?".
 
 Mod'en sender ingen data ud. Den læser kun sessionens egne tal og transcript-filer på din egen maskine.
 
@@ -25,9 +25,9 @@ Kræver en ny version af Claude Code (testet på 2.1.289) på macOS eller Linux.
    ```
 
    Findes filen ikke, så opret den med de linjer inde i `{ }`. Har du allerede `CLAUDE_CODE_PLUGIN_DIRS`, så sæt stierne efter hinanden med `:` imellem.
-3. Genstart Claude-appen. Skriv `/tokens dage` for at se, at den kører.
+3. Genstart Claude-appen. Skriv `/tokens` for at se, at den kører.
 
-Kun én terminal-session: `claude --plugin-dir token-maaler-0.3.0.zip`
+Kun én terminal-session: `claude --plugin-dir token-maaler-0.4.0.zip`
 
 ## Sådan regnes det
 

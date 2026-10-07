@@ -2,23 +2,24 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { KontekstDel } from '../types'
-import { afkort, analyser, detaljer, etiket, kontekstDele, listeLinje, opsummering } from './analyse'
+import { afkort, analyser, etiket, kontekstDele, opsummering } from './analyse'
 import type { Agent, Kald, Trin } from './analyse'
-import { byg, dagTekst, dageTekst, laesLinje, nySamling } from './historik'
-import type { Samling } from './historik'
+import { dagTekst, dageTekst, laesLinje, nySamling, opgaveTekst, projekt, projektTekst } from './historik'
+import type { Kilde, Projekt, Samling } from './historik'
 
 const opgaver = atom({ plugin: 'token-maaler', key: 'opgaver' } as const, [])
 const skjult = atom({ plugin: 'token-maaler', key: 'skjult' } as const, false)
-const visNr = atom({ plugin: 'token-maaler', key: 'visNr' } as const, null)
-const paneVisning = atom({ plugin: 'token-maaler', key: 'paneVisning' } as const, 'opgave')
-const dageLinjer = atom({ plugin: 'token-maaler', key: 'dageLinjer' } as const, [])
+const paneVisning = atom({ plugin: 'token-maaler', key: 'paneVisning' } as const, 'projekt')
+const paneNr = atom({ plugin: 'token-maaler', key: 'paneNr' } as const, null)
+const paneAntal = atom({ plugin: 'token-maaler', key: 'paneAntal' } as const, 0)
+const paneLinjer = atom({ plugin: 'token-maaler', key: 'paneLinjer' } as const, [])
 
 const PANE = 'token-maaler'
 const HISTORIK_VAERKTOEJ = 'mcp__token-maaler__historik'
 const FIRE_MB = 4 * 1024 * 1024
 
 const HISTORIK_BESKRIVELSE =
-  "Token usage and cost of this agent (this Claude Code session) across its whole history, read from its transcript files: the number of active days, the cost, tokens and tasks of each active day (day 1 is the first active day), and each day's most expensive tasks. Use it to answer questions such as 'what did day 2 cost?', 'how many days have we worked on this?' or 'what has this agent cost in total?'. Amounts are list prices. Leave out `dag` for the overview of all days."
+  "Token usage and cost of this project (this Claude Code session) across its whole history, read from its transcript files: total tokens and cost, every task (each message the user wrote) with its number, day and cost, the active days, and for one task what its cost went to (re-reading the conversation, tool results, thinking, subagents). Use it to answer questions such as 'what did task 7 cost?', 'what did day 2 cost?', 'which tasks were most expensive?' or 'how many days have we worked on this?'. Amounts are list prices. Without arguments it returns the project overview and the days."
 
 type Spand = { trin: Trin[]; kald: Kald[]; agenter: Record<string, Agent> }
 
@@ -31,6 +32,8 @@ type Igang = Spand & {
   forrigePrompt: number | null
   kontekst: Promise<KontekstDel[]>
 }
+
+type Visning = 'projekt' | 'opgave' | 'dage'
 
 const forbrug = async ($: EngineInterface) => {
   try {
@@ -58,7 +61,7 @@ const laengde = (vaerdi: unknown) => {
   }
 }
 
-// Agentens historik ligger i transcript-filerne under ~/.claude/projects/<projekt>/.
+// Projektets historik ligger i transcript-filerne under ~/.claude/projects/<projektmappe>/.
 const projekter = async ($: EngineInterface) =>
   `${(await $.env.get('CLAUDE_CONFIG_DIR')) ?? `${(await $.env.get('HOME')) ?? ''}/.claude`}/projects`
 
@@ -116,52 +119,88 @@ const findAgenter = async ($: EngineInterface, mappe: string, soeg: string) => {
 
 const cache = new Map<string, { stoerrelse: number; mtimeMs: number; samling: Samling }>()
 
-const samlingFor = async ($: EngineInterface, sti: string, hoved: boolean): Promise<Samling> => {
+const samlingFor = async ($: EngineInterface, sti: string, kilde: Kilde): Promise<Samling> => {
   const stat = await $.fs.stat(sti)
   const gemt = cache.get(sti)
   if (gemt && gemt.stoerrelse === stat.size && gemt.mtimeMs === stat.mtimeMs) return gemt.samling
-  const samling = nySamling()
-  await hverLinje($, sti, stat.size, linje => laesLinje(samling, linje, hoved))
+  const samling = nySamling(kilde)
+  await hverLinje($, sti, stat.size, linje => laesLinje(samling, linje))
   cache.set(sti, { stoerrelse: stat.size, mtimeMs: stat.mtimeMs, samling })
   return samling
 }
 
-const historik = async ($: EngineInterface, valg: { agent: string; dag: number | null; visuel: boolean }) => {
+// En subagents beskrivelse og type står i en fil ved siden af dens transcript.
+const kildeFor = async ($: EngineInterface, fil: string): Promise<Kilde> => {
+  const id = (fil.split('/').pop() ?? '').replace(/^agent-/, '').replace(/\.jsonl$/, '')
+  try {
+    const raa = await $.fs.read(fil.replace(/\.jsonl$/, '.meta.json'))
+    const meta = (typeof raa === 'string' ? JSON.parse(raa) : null) as { description?: unknown; agentType?: unknown } | null
+    return {
+      id,
+      beskrivelse: typeof meta?.description === 'string' ? meta.description : '',
+      type: typeof meta?.agentType === 'string' ? meta.agentType : '',
+    }
+  } catch {
+    return { id, beskrivelse: '', type: '' }
+  }
+}
+
+// Projektets historik: denne session, eller den session i projektmappen, hvis titel indeholder `soeg`.
+const hentProjekt = async ($: EngineInterface, soeg: string): Promise<Projekt | string> => {
   try {
     const egen = await $.session.id()
     const mappe = await projektMappe($, egen)
-    if (!mappe) return 'Fandt ikke agentens transcript.'
+    if (!mappe) return 'Fandt ikke projektets transcript.'
     let maal = { id: egen, titel: '' }
-    if (valg.agent) {
-      const fundne = await findAgenter($, mappe, valg.agent)
+    if (soeg) {
+      const fundne = await findAgenter($, mappe, soeg)
       const [fundet] = fundne
-      if (!fundet) return `Ingen agent i dette projekt har "${valg.agent}" i titlen.`
+      if (!fundet) return `Ingen session i projektmappen har "${soeg}" i titlen.`
       if (fundne.length > 1) {
-        return [`${fundne.length} agenter passer på "${valg.agent}":`, ...fundne.map(f => `  ${f.titel}`), 'Skriv mere af titlen.'].join('\n')
+        return [`${fundne.length} sessioner passer på "${soeg}":`, ...fundne.map(f => `  ${f.titel}`), 'Skriv mere af titlen.'].join('\n')
       }
       maal = fundet
     }
     const hovedfil = `${mappe}/${maal.id}.jsonl`
-    if (!(await $.fs.exists(hovedfil))) return 'Ingen historik endnu: agentens transcript er tomt.'
-    const samlinger = [await samlingFor($, hovedfil, true)]
-    for (const fil of await jsonlFiler($, `${mappe}/${maal.id}/subagents`)) samlinger.push(await samlingFor($, fil, false))
-    const h = byg(samlinger)
-    const medTitel = { ...h, titel: h.titel || maal.titel }
-    return (valg.dag === null ? dageTekst(medTitel, valg.visuel) : dagTekst(medTitel, valg.dag, valg.visuel)).join('\n')
+    if (!(await $.fs.exists(hovedfil))) return 'Ingen historik endnu: projektets transcript er tomt.'
+    const samlinger = [await samlingFor($, hovedfil, { id: '', beskrivelse: '', type: '' })]
+    for (const fil of await jsonlFiler($, `${mappe}/${maal.id}/subagents`)) samlinger.push(await samlingFor($, fil, await kildeFor($, fil)))
+    const p = projekt(samlinger)
+    return { ...p, titel: p.titel || maal.titel }
   } catch (fejl) {
     return `Kunne ikke læse historikken: ${fejl instanceof Error ? fejl.message : String(fejl)}`
   }
 }
 
+// Konteksten ved start måles kun live; den hentes fra den målte opgave med samme besked og tid.
+const kontekstFor = async ($: EngineInterface, p: Projekt, nr: number): Promise<KontekstDel[]> => {
+  const o = p.opgaver.find(x => x.nr === nr)
+  if (!o) return []
+  const live = (await read($, opgaver)).filter(x => typeof x.start === 'number' && x.prompt === o.tekst && Math.abs(x.start - o.t) < 10 * 60_000)
+  return live.at(-1)?.kontekst ?? []
+}
+
+const tekstFor = async ($: EngineInterface, p: Projekt, visning: Visning | 'dag', nr: number | null, visuel: boolean) => {
+  if (visning === 'opgave' && nr !== null) return opgaveTekst(p, nr, visuel, { kontekst: await kontekstFor($, p, nr) })
+  if (visning === 'dag' && nr !== null) return dagTekst(p, nr, visuel)
+  if (visning === 'dage') return dageTekst(p, visuel)
+  return projektTekst(p, visuel)
+}
+
+// Panelet viser samme tekst som kommandoerne; den beregnes, når en knap trykkes.
+const visPanel = async ($: EngineInterface, visning: Visning, nr: number | null) => {
+  const p = await hentProjekt($, '')
+  const valgt = typeof p === 'string' ? null : visning === 'opgave' ? (nr ?? p.opgaver.at(-1)?.nr ?? null) : null
+  const linjer = typeof p === 'string' ? [p] : await tekstFor($, p, visning, valgt, true)
+  await update($, paneLinjer, () => linjer)
+  await update($, paneVisning, () => visning)
+  await update($, paneNr, () => valgt)
+  await update($, paneAntal, () => (typeof p === 'string' ? 0 : p.opgaver.length))
+}
+
 const aabnPanel = async ($: EngineInterface, kommando: string) => {
   const aabnet = await $.ui.open({ id: PANE, title: 'Token-forbrug' })
   if (!aabnet.isPlaced) $.ui.toast(`Panelet kan ikke vises her. Skriv ${kommando}.`)
-}
-
-const visDage = async ($: EngineInterface) => {
-  const tekst = await historik($, { agent: '', dag: null, visuel: true })
-  await update($, dageLinjer, () => tekst.split('\n'))
-  await update($, paneVisning, () => 'dage')
 }
 
 export const register: Register = on => {
@@ -175,7 +214,7 @@ export const register: Register = on => {
   const spand = (): Spand => aktiv ?? ventende
 
   on('session.start', async ($, e, next) => {
-    await $.command.register({ name: 'tokens', description: 'Hvad tokens gik til: /tokens [nr] · /tokens dage · /tokens dag <nr>' })
+    await $.command.register({ name: 'tokens', description: 'Hele projektets forbrug: /tokens · én opgave: /tokens <nr> · dagene: /tokens dage' })
     try {
       await $.tool.register({
         name: 'historik',
@@ -183,8 +222,9 @@ export const register: Register = on => {
         inputSchema: {
           type: 'object',
           properties: {
+            opgave: { type: 'integer', minimum: 1, description: 'A task number, for what that task cost and what the cost went to.' },
             dag: { type: 'integer', minimum: 1, description: 'An active day number (1 = the first active day), for that day in detail.' },
-            agent: { type: 'string', description: "Part of another session's title in the same project, to look at that agent instead." },
+            agent: { type: 'string', description: "Part of another session's title in the same project folder, to look at that session instead." },
           },
         },
       })
@@ -245,9 +285,19 @@ export const register: Register = on => {
     // Historik-værktøjet, som modellen kan kalde, besvares her.
     if (String(e.tool) === HISTORIK_VAERKTOEJ) {
       const input = e as unknown as Record<string, unknown>
-      const dag = typeof input.dag === 'number' ? Math.trunc(input.dag) : null
-      const agent = typeof input.agent === 'string' ? input.agent.trim() : ''
-      return { result: await historik($, { agent, dag, visuel: false }) }
+      const heltal = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? Math.trunc(v) : null)
+      const opgave = heltal(input.opgave)
+      const dag = heltal(input.dag)
+      const soeg = typeof input.agent === 'string' ? input.agent.trim() : ''
+      const p = await hentProjekt($, soeg)
+      if (typeof p === 'string') return { result: p }
+      const linjer =
+        opgave !== null
+          ? await tekstFor($, p, 'opgave', opgave, false)
+          : dag !== null
+            ? await tekstFor($, p, 'dag', dag, false)
+            : [...projektTekst(p, false), '', ...dageTekst(p, false)]
+      return { result: linjer.join('\n') }
     }
     const loop = e.agentId ?? ''
     const trin = sidsteTrin.get(loop) ?? 0
@@ -272,6 +322,7 @@ export const register: Register = on => {
       const { usd } = await forbrug($)
       const opgave = analyser({
         nr: igang.nr,
+        start: igang.start,
         prompt: igang.prompt,
         afbrudt: e.isAborted,
         sekunder: Math.round((nu - igang.start) / 1000),
@@ -286,9 +337,7 @@ export const register: Register = on => {
       const sidste = igang.trin.filter(t => t.loop === '').at(-1)
       if (sidste) forrigePrompt = sidste.input + sidste.cacheLaes + sidste.cacheSkriv
       await update($, opgaver, liste => [...liste, opgave].slice(-50))
-      await update($, visNr, () => null)
-      const top = opgave.poster[0]
-      $.ui.toast(`Opgave ${opgave.nr}: ${opsummering(opgave)}${top ? ' · /tokens for detaljer' : ''}`)
+      $.ui.toast(`Seneste opgave: ${opsummering(opgave)} · /tokens`)
     } catch {
       // En fejl i analysen må ikke stoppe turen.
     }
@@ -296,26 +345,23 @@ export const register: Register = on => {
   })
 
   on('command.run', { command: 'tokens' }, async ($, e) => {
-    const [foerste = '', ...rest] = e.args.trim().split(/\s+/)
-    if (foerste === 'dage') return { text: await historik($, { agent: rest.join(' '), dag: null, visuel: true }) }
+    const ord = e.args.trim().split(/\s+/).filter(Boolean)
+    const [foerste = '', ...rest] = ord
+    await update($, skjult, () => false)
     if (foerste === 'dag') {
       const nr = Number.parseInt(rest[0] ?? '', 10)
       if (Number.isNaN(nr)) return { text: 'Skriv fx /tokens dag 2.' }
-      return { text: await historik($, { agent: rest.slice(1).join(' '), dag: nr, visuel: true }) }
+      const p = await hentProjekt($, rest.slice(1).join(' '))
+      return { text: typeof p === 'string' ? p : (await tekstFor($, p, 'dag', nr, true)).join('\n') }
     }
-    const liste = await read($, opgaver)
-    if (liste.length === 0) return { text: 'Ingen opgaver målt endnu i denne session. Hele agentens forbrug pr. dag: /tokens dage' }
-    const tal = Number.parseInt(foerste, 10)
-    const valgt = Number.isNaN(tal) ? liste.at(-1) : liste.find(o => o.nr === tal)
-    if (!valgt) {
-      return { text: `Opgave ${e.args.trim()} findes ikke. Der er opgave ${liste[0]?.nr}–${liste.at(-1)?.nr}.` }
-    }
-    const linjer = detaljer(valgt)
-    const andre = liste.filter(o => o.nr !== valgt.nr).slice(-8).reverse()
-    if (andre.length) linjer.push('', 'Andre opgaver:', ...andre.map(listeLinje), 'Skriv /tokens <nr> for detaljer.')
-    linjer.push('', 'Hele agentens forbrug pr. dag: /tokens dage')
-    await update($, skjult, () => false)
-    return { text: linjer.join('\n') }
+    const [visning, nr, soeg]: [Visning, number | null, string] =
+      foerste === 'dage'
+        ? ['dage', null, rest.join(' ')]
+        : /^\d+$/.test(foerste)
+          ? ['opgave', Number(foerste), rest.join(' ')]
+          : ['projekt', null, ord.join(' ')]
+    const p = await hentProjekt($, soeg)
+    return { text: typeof p === 'string' ? p : (await tekstFor($, p, visning, nr, true)).join('\n') }
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
@@ -331,17 +377,16 @@ export const register: Register = on => {
           key="detaljer"
           label="Detaljer"
           onPress={async () => {
-            await update($, visNr, () => sidste.nr)
-            await update($, paneVisning, () => 'opgave')
-            await aabnPanel($, '/tokens')
+            await visPanel($, 'opgave', null)
+            await aabnPanel($, '/tokens <nr>')
           }}
         />
         <Button
-          key="dage"
-          label="Dage"
+          key="projekt"
+          label="Projekt"
           onPress={async () => {
-            await visDage($)
-            await aabnPanel($, '/tokens dage')
+            await visPanel($, 'projekt', null)
+            await aabnPanel($, '/tokens')
           }}
         />
         <Button key="skjul" label="Skjul" onPress={() => update($, skjult, () => true)} />
@@ -363,42 +408,23 @@ export const register: Register = on => {
         </Box>
       )
     }
-    const dageKnap = <Button key="dage" label="Dage" onPress={() => visDage($)} />
-
-    if ((await read($, paneVisning)) === 'dage') {
-      return (
-        <Box flexDirection="column">
-          {(await read($, dageLinjer)).map(vis)}
-          <Box>
-            <Button key="opgaver" label="‹ Opgaver" onPress={() => update($, paneVisning, () => 'opgave')} />
-            <Button key="opdater" label="Opdater" onPress={() => visDage($)} />
-          </Box>
-        </Box>
-      )
-    }
-
-    const liste = await read($, opgaver)
-    const valgtNr = await read($, visNr)
-    const valgt = liste.find(o => o.nr === valgtNr) ?? liste.at(-1)
-    if (!valgt) {
-      return (
-        <Box flexDirection="column">
-          <Text dimColor>Ingen opgaver målt endnu i denne session.</Text>
-          <Box>{dageKnap}</Box>
-        </Box>
-      )
-    }
-    const i = liste.indexOf(valgt)
-    const forrige = liste[i - 1]
-    const naeste = liste[i + 1]
+    const visning = await read($, paneVisning)
+    const nr = await read($, paneNr)
+    const antal = await read($, paneAntal)
+    const linjer = await read($, paneLinjer)
 
     return (
       <Box flexDirection="column">
-        {detaljer(valgt).map(vis)}
+        {(linjer.length ? linjer : ['Tryk Projekt for at hente forbruget.']).map(vis)}
         <Box>
-          {forrige !== undefined && <Button key="forrige" label="‹ Forrige" onPress={() => update($, visNr, () => forrige.nr)} />}
-          {naeste !== undefined && <Button key="naeste" label="Næste ›" onPress={() => update($, visNr, () => naeste.nr)} />}
-          {dageKnap}
+          <Button key="projekt" label="Projekt" onPress={() => visPanel($, 'projekt', null)} />
+          <Button key="dage" label="Dage" onPress={() => visPanel($, 'dage', null)} />
+          {visning === 'opgave' && nr !== null && nr > 1 && (
+            <Button key="forrige" label="‹ Forrige" onPress={() => visPanel($, 'opgave', nr - 1)} />
+          )}
+          {visning === 'opgave' && nr !== null && nr < antal && (
+            <Button key="naeste" label="Næste ›" onPress={() => visPanel($, 'opgave', nr + 1)} />
+          )}
         </Box>
       </Box>
     )

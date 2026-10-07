@@ -18,6 +18,7 @@ const trin = (index: number, felter: Partial<Trin>): Trin => ({
 
 const raa = (felter: Partial<Raadata>): Raadata => ({
   nr: 1,
+  start: 0,
   prompt: 'Opgave',
   afbrudt: false,
   sekunder: 30,

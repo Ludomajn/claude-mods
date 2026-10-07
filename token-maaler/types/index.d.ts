@@ -23,6 +23,7 @@ export type KontekstDel = { navn: string; tokens: number }
 
 export type Opgave = {
   nr: number
+  start: number
   prompt: string
   afbrudt: boolean
   sekunder: number
@@ -46,9 +47,10 @@ declare module 'claude-code' {
     'token-maaler': {
       opgaver: Opgave[]
       skjult: boolean
-      visNr: number | null
-      paneVisning: 'opgave' | 'dage'
-      dageLinjer: string[]
+      paneVisning: 'projekt' | 'opgave' | 'dage'
+      paneNr: number | null
+      paneAntal: number
+      paneLinjer: string[]
     }
   }
 }

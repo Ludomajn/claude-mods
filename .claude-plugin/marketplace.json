@@ -8,8 +8,8 @@
     {
       "name": "token-maaler",
       "source": "./token-maaler",
-      "description": "Viser hvad hver opgave og hver dag kostede i tokens og penge, og hvorfor",
-      "version": "0.3.0"
+      "description": "Viser hvad projektet, hver opgave og hver dag kostede i tokens og penge, og hvorfor",
+      "version": "0.4.0"
     }
   ]
 }

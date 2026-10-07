@@ -4,7 +4,7 @@ Mods til Claude Code.
 
 | Mod | Hvad den gør |
 | --- | --- |
-| [token-maaler](token-maaler) | Viser hvad hver opgave og hver dag kostede i tokens og penge, og hvad der kostede mest. |
+| [token-maaler](token-maaler) | Viser hvad projektet, hver opgave og hver dag kostede i tokens og penge, og hvad der kostede mest. |
 
 ## Installation
 

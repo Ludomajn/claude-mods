@@ -20,6 +20,7 @@ export type Agent = { beskrivelse: string; type: string }
 
 export type Raadata = {
   nr: number
+  start: number
   prompt: string
   afbrudt: boolean
   sekunder: number
@@ -329,6 +330,7 @@ export const analyser = (r: Raadata): Opgave => {
   const { forklaring, tip } = hvorfor(poster[0], n)
   return {
     nr: r.nr,
+    start: r.start,
     prompt: r.prompt,
     afbrudt: r.afbrudt,
     sekunder: r.sekunder,
@@ -369,8 +371,6 @@ export const opsummering = (o: Opgave): string => {
     .join(' · ')
 }
 
-export const listeLinje = (o: Opgave): string => `${o.nr}. "${afkort(o.prompt, 40)}" · ${opsummering(o)}`
-
 const beskriv = (p: Post): string => {
   switch (p.type) {
     case 'start':
@@ -387,9 +387,12 @@ const beskriv = (p: Post): string => {
   }
 }
 
-export const detaljer = (o: Opgave): string[] => {
+// `mere` står efter opgavenummeret (fx dag og dato); uden bjælker er teksten til modellen.
+export const detaljer = (o: Opgave, mere = '', visuel = true): string[] => {
+  const linje = (andel: number, usd: number | null, tekst: string) =>
+    visuel ? bjaelkeLinje(andel, usd, tekst) : `${procent(andel)} · ${usd !== null ? `${dollar(usd)} · ` : ''}${tekst}`
   const linjer = [
-    `Opgave ${o.nr}${o.afbrudt ? ' (afbrudt)' : ''}: "${o.prompt}"`,
+    `Opgave ${o.nr}${mere ? ` · ${mere}` : ''}${o.afbrudt ? ' (afbrudt)' : ''}: "${o.prompt}"`,
     [
       `${fmt(o.ind + o.ud)} tokens`,
       o.usd !== null ? dollar(o.usd) : '',
@@ -403,12 +406,12 @@ export const detaljer = (o: Opgave): string[] => {
     `Hvorfor: ${o.forklaring}`,
   ]
   if (o.poster.length) linjer.push('', 'Hvad prisen gik til (ca.):')
-  for (const p of o.poster.slice(0, 5)) linjer.push(bjaelkeLinje(p.andel, p.usd, `${p.navn} (${beskriv(p)})`))
+  for (const p of o.poster.slice(0, 5)) linjer.push(linje(p.andel, p.usd, `${p.navn} (${beskriv(p)})`))
   const resten = o.poster.slice(5)
   if (resten.length) {
     const andel = resten.reduce((s, p) => s + p.andel, 0)
     const usd = o.usd !== null ? resten.reduce((s, p) => s + (p.usd ?? 0), 0) : null
-    linjer.push(bjaelkeLinje(andel, usd, 'resten'))
+    linjer.push(linje(andel, usd, 'resten'))
   }
   if (o.kontekst.length) {
     linjer.push('', `Samtalen ved start: ${o.kontekst.map(k => `${k.navn} ${fmt(k.tokens)}`).join(' · ')}`)
