@@ -8,6 +8,7 @@ Viser, hvad projektet, hver opgave og hver dag kostede i tokens og dollars, og h
 - `/tokens Kundekrigen` viser en anden session i samme projektmappe (en del af titlen er nok).
 - Efter hver opgave vises et bånd over prompten med knapperne **Detaljer** og **Projekt**.
 - Du kan også spørge Claude, fx "hvad kostede opgave 4?" eller "hvor mange dage har vi arbejdet på det her?".
+- `/tokens råd` viser analytikerens råd til at bruge færre tokens, hver med et skøn over, hvad det kunne have sparet. Efter en opgave får du en besked, når der er et nyt råd, og båndet får knappen **Råd**.
 
 Mod'en læser sessionens egne tal og transcript-filer på din egen maskine. For at beskrive opgaverne sender den korte uddrag (din besked, Claudes svar og hvilke filer der blev rørt) til Claude Haiku over samme forbindelse som samtalen; hver beskrivelse gemmes, så det sker én gang pr. opgave og koster under en øre. Ellers sender den intet ud.
 
@@ -34,3 +35,18 @@ Kun én terminal-session: `claude --plugin-dir token-maaler-0.4.0.zip`
 Hvert modelkald melder sine egne tokens. Et værktøjsresultat (fx en fil, der læses) bliver i samtalen og læses igen i alle senere runder, så mod'en tæller det med dér.
 
 Historikken pr. dag kommer fra sessionens transcript-filer i `~/.claude/projects`. En dag er en kalenderdag i din egen tidszone, og dag 1 er den første dag med aktivitet. Priserne er Anthropics listepriser; kald i baggrunden (titler, forslag) står ikke i transcriptet og er ikke med.
+
+## Analytikerens råd
+
+Efter hver opgave gennemgår analytikeren hele projektet. Et nyt råd (eller et, der er blevet dobbelt så stort) vises én gang som besked. Reglerne i dag:
+
+- Lang samtale: hver runde læser hele samtalen igen; `/compact` eller en ny session gør det billigere.
+- Pauser: efter cirka en time skal hele samtalen skrives til cachen igen.
+- Store værktøjsresultater: hele filer og lange output, der læses igen i de følgende runder.
+- Tænkning og subagenter, når de fylder meget af prisen.
+- Rutineopgaver som commit og push i en lang samtale.
+- Forbindelser og plugins, der følger med i hver runde (kun for den aktive session).
+
+### Sådan tilføjer du et råd
+
+Reglerne står i `hooks/raad.ts`. En regel er en funktion, der får projektet og hver opgaves analyse og giver nul eller flere råd tilbage (titel, tekst, hvad man kan gøre, eksempler og et skøn i dollars). Skriv funktionen, og sæt den i listen `REGLER`. Notifikationer, `/tokens råd`, panelet og Claudes værktøj bruger den så automatisk.

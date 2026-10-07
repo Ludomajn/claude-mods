@@ -417,7 +417,7 @@ export const beskrivelsesPrompt = (o: HistOpgave): string =>
 
 const FODNOTE = 'Beløbene er listepris for samtalens og subagenternes modelkald. Kald i baggrunden, fx titler og forslag, er ikke med.'
 
-export const projektTekst = (p: Projekt, visuel = true, b: Beskrivelser = new Map()): string[] => {
+export const projektTekst = (p: Projekt, visuel = true, b: Beskrivelser = new Map(), raadLinje = ''): string[] => {
   if (p.kald === 0) return [`${navn(p)}: ingen modelkald i historikken endnu.`]
   const sorteret = p.opgaver.filter(o => o.usd > 0).sort((a, b) => b.usd - a.usd)
   const resten = sorteret.slice(10)
@@ -433,6 +433,7 @@ export const projektTekst = (p: Projekt, visuel = true, b: Beskrivelser = new Ma
     const usd = resten.reduce((s, o) => s + o.usd, 0)
     linjer.push(plus(resten.length, usd, p.usd > 0 ? usd / p.usd : 0, 'opgaver'))
   }
+  if (raadLinje) linjer.push('', raadLinje)
   const seneste = p.opgaver.at(-1)
   if (visuel) {
     linjer.push('', `Skriv /tokens <nr> for en opgave${seneste ? ` (den seneste er ${seneste.nr})` : ''} og /tokens dage for dagene.`)

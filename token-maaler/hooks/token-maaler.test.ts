@@ -194,3 +194,60 @@ test('historikken: /tokens viser projektet, /tokens <nr> en opgave, og panelet o
   expect(await panel.find({ type: 'Text', text: /2 aktive dage/ })).toBeDefined()
   await panel.unmount()
 })
+
+// Testmotoren kender setTimeout, men motorens typer gør ikke.
+const vent = (ms: number) =>
+  new Promise<void>(r => (globalThis as unknown as { setTimeout: (f: () => void, ms: number) => void }).setTimeout(r, ms))
+
+// En samtale på 400k tokens, der læses igen i 10 runder: nok til et råd om /compact.
+const langTranscript = [
+  linje('user', '2026-10-01T09:00:00.000Z', { message: { role: 'user', content: 'Byg det hele' } }),
+  ...Array.from({ length: 10 }, (_, i) =>
+    linje('assistant', `2026-10-01T09:${String(i + 1).padStart(2, '0')}:00.000Z`, {
+      message: { id: `L${i}`, model: 'claude-opus-5-5', content: [], usage: { output_tokens: 100, cache_read_input_tokens: 400_000 } },
+    }),
+  ),
+].join('\n')
+
+test('analytikeren giver et råd efter en opgave i en lang samtale og gentager det ikke', async ($, on) => {
+  const ur = mock.clock(on)
+  mock.env(on, { HOME: '/h' })
+  mock.store(on)
+  const toasts: string[] = []
+  motor(on, toasts, [], () => 1)
+  const mappe = '/h/.claude/projects/-p-x'
+  on('session.id', async () => ({ value: 's1' }))
+  on('session.cwd', async () => ({ value: '/p/x' }))
+  on('fs.exists', async (_, e) => ({ value: [`${mappe}/s1.jsonl`, mappe].includes(e.path) }))
+  on('fs.list', async () => ({ value: [] as never }))
+  on('fs.stat', async () => ({ value: { kind: 'file', size: 3_000, mtimeMs: 1, isLink: false } }))
+  on('fs.read', async () => ({ value: langTranscript }))
+
+  const raadToasts = () => toasts.filter(t => t.startsWith('Råd:'))
+  const enOpgave = async (turnId: string) => {
+    await $.turn.start({ text: 'Byg det hele', turnId })
+    const stroem = $.turn.step({ turnId, index: 0, model: 'claude-opus-5-5', messageCount: 1 })
+    for await (const _ of stroem) {
+      // tøm strømmen
+    }
+    await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId, reason: 'answer' } as never)
+    await ur.advance(3_000)
+    // Analytikeren kører i en timer; giv den lidt tid til at blive færdig.
+    for (let i = 0; i < 50 && raadToasts().length === 0; i++) await vent(10)
+  }
+
+  await enOpgave('t1')
+  expect(raadToasts()).toEqual([expect.stringMatching(/^Råd: Lang samtale: hver runde læser op til 400k tokens igen · ca\. \$0\.68 at spare · \/tokens råd$/)])
+
+  const baand = await $.ui.mount({ plugin: 'token-maaler', surface: 'desktop', component: 'AbovePrompt', props: baandProps } as never)
+  expect((await baand.find({ key: 'raad' }))?.props.label).toBe('Råd (1)')
+  await baand.unmount()
+
+  await enOpgave('t2')
+  await vent(200)
+  expect(raadToasts()).toHaveLength(1)
+
+  const tekst = (await $.command.run({ command: 'tokens', args: 'råd' } as never)).text ?? ''
+  expect(tekst).toContain('Råd til at bruge færre tokens')
+  expect(tekst).toContain('→ Skriv /compact')
+})

@@ -2,10 +2,12 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { KontekstDel } from '../types'
-import { afkort, analyser, etiket, kontekstDele, opsummering } from './analyse'
+import { afkort, analyser, dollar, etiket, kontekstDele, opsummering } from './analyse'
 import type { Agent, Kald, Trin } from './analyse'
 import { beskrivelsesPrompt, dagTekst, dageTekst, laesLinje, nySamling, opgaveTekst, projekt, projektTekst, renBeskrivelse, visteOpgaver } from './historik'
 import type { HistOpgave, Kilde, Projekt, Samling } from './historik'
+import { overheadFra, raad, raadTekst } from './raad'
+import type { Grundlag, Overhead, Raad } from './raad'
 
 const opgaver = atom({ plugin: 'token-maaler', key: 'opgaver' } as const, [])
 const skjult = atom({ plugin: 'token-maaler', key: 'skjult' } as const, false)
@@ -13,6 +15,7 @@ const paneVisning = atom({ plugin: 'token-maaler', key: 'paneVisning' } as const
 const paneNr = atom({ plugin: 'token-maaler', key: 'paneNr' } as const, null)
 const paneAntal = atom({ plugin: 'token-maaler', key: 'paneAntal' } as const, 0)
 const paneLinjer = atom({ plugin: 'token-maaler', key: 'paneLinjer' } as const, [])
+const raadListe = atom({ plugin: 'token-maaler', key: 'raad' } as const, [])
 
 const PANE = 'token-maaler'
 const HISTORIK_VAERKTOEJ = 'mcp__token-maaler__historik'
@@ -33,7 +36,7 @@ type Igang = Spand & {
   kontekst: Promise<KontekstDel[]>
 }
 
-type Visning = 'projekt' | 'opgave' | 'dage'
+type Visning = 'projekt' | 'opgave' | 'dage' | 'raad'
 
 const forbrug = async ($: EngineInterface) => {
   try {
@@ -204,7 +207,47 @@ const beskriv = async ($: EngineInterface, p: Projekt, liste: readonly HistOpgav
   return new Map(par.filter((x): x is [number, string] => x !== null))
 }
 
+// Det faste overhead i hver runde: indlæste MCP-værktøjer og plugins' skills (kun for den aktive session).
+const hentOverhead = async ($: EngineInterface): Promise<Overhead | null> => {
+  try {
+    const b = (await $.session.usage({ breakdown: 'summary' })).context.breakdown
+    return b ? overheadFra(b.mcpTools, b.skills?.skillFrontmatter ?? []) : null
+  } catch {
+    return null
+  }
+}
+
+// Analytikerens grundlag: hver opgave med sin analyse, og overhead når projektet er den aktive session.
+const raadFor = async ($: EngineInterface, p: Projekt): Promise<Raad[]> => {
+  const grundlag: Grundlag = {
+    projekt: p,
+    opgaver: p.opgaver.map(o => ({ o, a: analyser(o.raa) })),
+    overhead: p.id === (await $.session.id()) ? await hentOverhead($) : null,
+  }
+  return raad(grundlag)
+}
+
+// Efter hver opgave: er der et nyt råd (eller er et gammelt blevet dobbelt så stort), vises det én gang.
+const tjekRaad = async ($: EngineInterface) => {
+  try {
+    const p = await hentProjekt($, '')
+    if (typeof p === 'string') return
+    const liste = await raadFor($, p)
+    await update($, raadListe, () => liste.map(r => ({ id: r.id, titel: r.titel, usd: r.usd })))
+    const noegle = `raad-vist:${p.id}`
+    const gemt = await $.store.get(noegle)
+    const vist = (gemt !== null && typeof gemt === 'object' ? gemt : {}) as Record<string, number>
+    const nyt = liste.find(r => r.usd >= 0.5 && r.usd >= 2 * (vist[r.id] ?? 0))
+    if (!nyt) return
+    await $.store.set(noegle, { ...vist, [nyt.id]: nyt.usd })
+    $.ui.toast(`Råd: ${nyt.titel} · ca. ${dollar(nyt.usd)} at spare · /tokens råd`, { timeoutMs: 10_000 })
+  } catch {
+    // Et råd må aldrig forstyrre arbejdet.
+  }
+}
+
 const tekstFor = async ($: EngineInterface, p: Projekt, visning: Visning | 'dag', nr: number | null, visuel: boolean) => {
+  if (visning === 'raad') return raadTekst(p.titel || 'dette projekt', await raadFor($, p), visuel)
   if (visning === 'opgave' && nr !== null) {
     const opgave = p.opgaver.filter(o => o.nr === nr)
     return opgaveTekst(p, nr, visuel, { kontekst: await kontekstFor($, p, nr) }, await beskriv($, p, opgave))
@@ -214,7 +257,9 @@ const tekstFor = async ($: EngineInterface, p: Projekt, visning: Visning | 'dag'
     return dagTekst(p, nr, visuel, await beskriv($, p, p.opgaver.filter(o => dyreste.some(x => x.nr === o.nr))))
   }
   if (visning === 'dage') return dageTekst(p, visuel)
-  return projektTekst(p, visuel, await beskriv($, p, visteOpgaver(p)))
+  const [stoerst] = await raadFor($, p)
+  const raadLinje = stoerst ? `Største råd: ${stoerst.titel} (ca. ${dollar(stoerst.usd)} at spare). Skriv /tokens råd for alle råd.` : ''
+  return projektTekst(p, visuel, await beskriv($, p, visteOpgaver(p)), raadLinje)
 }
 
 // Panelet viser samme tekst som kommandoerne; den beregnes, når en knap trykkes.
@@ -255,6 +300,7 @@ export const register: Register = on => {
             opgave: { type: 'integer', minimum: 1, description: 'A task number, for what that task cost and what the cost went to.' },
             dag: { type: 'integer', minimum: 1, description: 'An active day number (1 = the first active day), for that day in detail.' },
             agent: { type: 'string', description: "Part of another session's title in the same project folder, to look at that session instead." },
+            raad: { type: 'boolean', description: 'True for advice on how to use fewer tokens, each with an estimated saving and what to do.' },
           },
         },
       })
@@ -322,7 +368,9 @@ export const register: Register = on => {
       const p = await hentProjekt($, soeg)
       if (typeof p === 'string') return { result: p }
       const linjer =
-        opgave !== null
+        input.raad === true
+          ? await tekstFor($, p, 'raad', null, false)
+          : opgave !== null
           ? await tekstFor($, p, 'opgave', opgave, false)
           : dag !== null
             ? await tekstFor($, p, 'dag', dag, false)
@@ -368,6 +416,8 @@ export const register: Register = on => {
       if (sidste) forrigePrompt = sidste.input + sidste.cacheLaes + sidste.cacheSkriv
       await update($, opgaver, liste => [...liste, opgave].slice(-50))
       $.ui.toast(`Seneste opgave: ${opsummering(opgave)} · /tokens`)
+      // Analytikeren kigger på hele projektet lidt efter, når transcriptet er skrevet færdigt.
+      $.clock.after(3_000, () => void tjekRaad($))
     } catch {
       // En fejl i analysen må ikke stoppe turen.
     }
@@ -387,6 +437,8 @@ export const register: Register = on => {
     const [visning, nr, soeg]: [Visning, number | null, string] =
       foerste === 'dage'
         ? ['dage', null, rest.join(' ')]
+        : foerste === 'råd' || foerste === 'raad'
+          ? ['raad', null, rest.join(' ')]
         : /^\d+$/.test(foerste)
           ? ['opgave', Number(foerste), rest.join(' ')]
           : ['projekt', null, ord.join(' ')]
@@ -399,6 +451,7 @@ export const register: Register = on => {
     if (e.props.hasSurvey || !sidste || (await read($, skjult))) return next(e)
 
     const { Box, Button, Text } = $.ui.resolve(e)
+    const raadAntal = (await read($, raadListe)).length
 
     return (
       <Box>
@@ -419,6 +472,16 @@ export const register: Register = on => {
             await aabnPanel($, '/tokens')
           }}
         />
+        {raadAntal > 0 && (
+          <Button
+            key="raad"
+            label={`Råd (${raadAntal})`}
+            onPress={async () => {
+              await visPanel($, 'raad', null)
+              await aabnPanel($, '/tokens råd')
+            }}
+          />
+        )}
         <Button key="skjul" label="Skjul" onPress={() => update($, skjult, () => true)} />
       </Box>
     )
@@ -449,6 +512,7 @@ export const register: Register = on => {
         <Box>
           <Button key="projekt" label="Projekt" onPress={() => visPanel($, 'projekt', null)} />
           <Button key="dage" label="Dage" onPress={() => visPanel($, 'dage', null)} />
+          <Button key="raad" label="Råd" onPress={() => visPanel($, 'raad', null)} />
           {visning === 'opgave' && nr !== null && nr > 1 && (
             <Button key="forrige" label="‹ Forrige" onPress={() => visPanel($, 'opgave', nr - 1)} />
           )}
