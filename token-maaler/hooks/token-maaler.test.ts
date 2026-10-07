@@ -466,11 +466,13 @@ test('båndet viser 5-timersgrænsen og ugens grænse som målere: en graf på d
   const desktop = await $.ui.mount({ plugin: 'token-maaler', surface: 'desktop', component: 'AbovePrompt', props: baandProps } as never)
   const svg = await desktop.find({ type: 'Svg' })
   expect(String(svg?.props.source)).toContain('<svg')
+  // Tegnet i sin egen størrelse, så den ikke skaleres op, og uden en hvid ramme.
+  expect([svg?.props.height, svg?.props.isInteractive]).toEqual([16, undefined])
   expect(String(svg?.props.alt)).toMatch(/^5 t ██░+ 23 % \(nulstilles .+\)  ·  Uge █░+ 8 % \(nulstilles .+\)$/)
   await desktop.unmount()
 
   const terminal = await $.ui.mount({ plugin: 'token-maaler', surface: 'terminal', component: 'AbovePrompt', props: baandProps } as never)
-  expect(await terminal.find({ type: 'Text', text: /^5 t ██░+ 23 %/ })).toBeDefined()
+  expect(await terminal.find({ type: 'Text', text: /^\s*5 t ██░+ 23 %/ })).toBeDefined()
   expect(await terminal.find({ type: 'Svg' })).toBeUndefined()
   await terminal.unmount()
 

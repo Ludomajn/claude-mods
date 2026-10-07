@@ -47,6 +47,15 @@ export const nulstilles = (g: Graense, nu: number): string => {
   return `${idag ? '' : `${UGEDAG[d.getDay()] ?? ''} `}kl. ${to(d.getHours())}:${to(d.getMinutes())}`
 }
 
+// En færdig tegning med sin størrelse, så den tegnes i præcis den størrelse og ikke skaleres op.
+export type Tegning = { source: string; width: number; height: number }
+
+const svg = (w: number, h: number, indhold: string): Tegning => ({
+  source: `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" style="background:transparent">${indhold}</svg>`,
+  width: w,
+  height: h,
+})
+
 const fyld = (p: number) => (p >= 80 ? '#f85149' : p >= 50 ? '#d29922' : CYAN)
 
 const pct = (p: number) => `${Math.round(p)} %`
@@ -56,28 +65,26 @@ const graenseTooltip = (g: Graense, nu: number) => {
   return `${NAVN[g.kind]?.lang ?? g.kind}: ${pct(brugt(g, nu))} brugt${n ? `, nulstilles ${n}` : ''}`
 }
 
-// Målerne til båndet: to små bjælker på én linje.
-export const maalerSvgLille = (graenser: readonly Graense[], nu: number): string => {
+// Målerne til båndet: to små bjælker på én linje, lige så høje som teksten.
+export const maalerSvgLille = (graenser: readonly Graense[], nu: number): Tegning => {
   const vist = vistGraenser(graenser)
-  const bred = 150
+  const bred = 118
   const dele = vist.map((g, i) => {
     const x = i * bred
     const p = brugt(g, nu)
-    const w = Math.max(p > 0 ? 2 : 0, Math.min(100, p) * 0.7)
+    const w = Math.max(p > 0 ? 2 : 0, Math.min(100, p) * 0.5)
     return [
-      `<g><title>${xml(graenseTooltip(g, nu))}</title>`,
-      `<text x="${x}" y="15" fill="${TEKST}" font-size="12" ${SKRIFT}>${xml(NAVN[g.kind]?.kort ?? g.kind)}</text>`,
-      `<rect x="${x + 30}" y="6" width="70" height="10" rx="5" fill="${SPOR}"/>`,
-      `<rect x="${x + 30}" y="6" width="${w.toFixed(1)}" height="10" rx="5" fill="${fyld(p)}"/>`,
-      `<text x="${x + 106}" y="15" fill="${TEKST}" font-size="12" ${SKRIFT}>${pct(p)}</text></g>`,
+      `<text x="${x}" y="12" fill="${TEKST}" font-size="11" ${SKRIFT}>${xml(NAVN[g.kind]?.kort ?? g.kind)}</text>`,
+      `<rect x="${x + 26}" y="5" width="50" height="6" rx="3" fill="${SPOR}"/>`,
+      `<rect x="${x + 26}" y="5" width="${w.toFixed(1)}" height="6" rx="3" fill="${fyld(p)}"/>`,
+      `<text x="${x + 81}" y="12" fill="${TEKST}" font-size="11" ${SKRIFT}>${pct(p)}</text>`,
     ].join('')
   })
-  const w = vist.length * bred
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="22" viewBox="0 0 ${w} 22">${dele.join('')}</svg>`
+  return svg(Math.max(1, vist.length * bred - 6), 16, dele.join(''))
 }
 
 // Målerne til panelet: én række pr. grænse med hvornår den nulstilles.
-export const maalerSvgStor = (graenser: readonly Graense[], nu: number): string => {
+export const maalerSvgStor = (graenser: readonly Graense[], nu: number): Tegning => {
   const vist = vistGraenser(graenser)
   const rader = vist.map((g, i) => {
     const y = i * 30
@@ -93,7 +100,7 @@ export const maalerSvgStor = (graenser: readonly Graense[], nu: number): string 
     ].join('')
   })
   const h = Math.max(1, vist.length) * 30
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="700" height="${h}" viewBox="0 0 700 ${h}">${rader.join('')}</svg>`
+  return svg(700, h, rader.join(''))
 }
 
 // Målerne som tekst, til terminalen og til beskrivelsen af SVG'en.
@@ -107,7 +114,7 @@ export const maalerTekst = (graenser: readonly Graense[], nu: number): string =>
     .join('  ·  ')
 
 // Søjlediagram, fx forbruget pr. dag.
-export const soejlerSvg = (soejler: readonly Soejle[]): string => {
+export const soejlerSvg = (soejler: readonly Soejle[]): Tegning => {
   const hoej = Math.max(...soejler.map(s => s.vaerdi), 0)
   const bred = 70
   const top = 20
@@ -126,7 +133,7 @@ export const soejlerSvg = (soejler: readonly Soejle[]): string => {
   })
   const w = soejler.length * bred
   const h = top + max + 24
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${dele.join('')}</svg>`
+  return svg(w, h, dele.join(''))
 }
 
 export const soejlerTekst = (soejler: readonly Soejle[]): string[] => {

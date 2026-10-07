@@ -901,14 +901,14 @@ export const register: Register = (on, options) => {
     const { Box, Button, Text } = el
     const g = await read($, graenser)
     const nu = await $.clock.now()
-    // Målerne for 5-timersgrænsen og ugens grænse: en lille graf, i terminalen som tekst.
+    // Målerne for 5-timersgrænsen og ugens grænse efter knapperne: en lille graf, i terminalen som tekst.
     const maaler =
       vistGraenser(g).length === 0 ? null : 'Svg' in el && e.surface !== 'terminal' ? (
-        <Box marginRight={2}>
-          <el.Svg source={maalerSvgLille(g, nu)} alt={maalerTekst(g, nu)} isInteractive />
+        <Box marginLeft={2}>
+          <el.Svg {...maalerSvgLille(g, nu)} alt={maalerTekst(g, nu)} />
         </Box>
       ) : (
-        <Text dimColor>{maalerTekst(g, nu)} · </Text>
+        <Text dimColor> {maalerTekst(g, nu)}</Text>
       )
     const visForbrug = async () => {
       await visPanel($, 'forbrug', null)
@@ -920,11 +920,11 @@ export const register: Register = (on, options) => {
       if (!indstillinger.velkomst || (await read($, velkomstSkjult))) return next(e)
       return (
         <Box alignItems="center">
-          {maaler}
           <Text dimColor>Bliv klogere på dit forbrug og dine prompts </Text>
           <Button key="indsigt" label="Indsigt" onPress={() => visIndsigt($)} />
           {indstillinger.promptsmart && <Button key="promptsmart" label="Dine prompts" onPress={() => visPromptsmart($)} />}
           <Button key="skjul" label="Skjul" onPress={() => update($, velkomstSkjult, () => true)} />
+          {maaler}
         </Box>
       )
     }
@@ -933,7 +933,6 @@ export const register: Register = (on, options) => {
 
     return (
       <Box alignItems="center">
-        {maaler}
         <Text dimColor>Sidste opgave: {opsummering(sidste)} </Text>
         <Button
           key="detaljer"
@@ -953,6 +952,7 @@ export const register: Register = (on, options) => {
         />
         <Button key="forbrug" label="Forbrug" onPress={visForbrug} />
         <Button key="skjul" label="Skjul" onPress={() => update($, skjult, () => true)} />
+        {maaler}
       </Box>
     )
   })
@@ -1006,7 +1006,7 @@ export const register: Register = (on, options) => {
             {vistGraenser(g).length === 0 ? (
               <Text dimColor>Grænserne vises, når Claude har svaret første gang.</Text>
             ) : 'Svg' in el && e.surface !== 'terminal' ? (
-              <el.Svg source={maalerSvgStor(g, nu)} alt={maalerTekst(g, nu)} isInteractive />
+              <el.Svg {...maalerSvgStor(g, nu)} alt={maalerTekst(g, nu)} />
             ) : (
               <Text>{maalerTekst(g, nu)}</Text>
             )}
@@ -1015,7 +1015,7 @@ export const register: Register = (on, options) => {
               <Text dimColor> · {grafik.periode} · alle samtaler</Text>
             </Box>
             {'Svg' in el && e.surface !== 'terminal' ? (
-              <el.Svg source={soejlerSvg(grafik.dage)} alt={soejlerTekst(grafik.dage).join('\n')} isInteractive />
+              <el.Svg {...soejlerSvg(grafik.dage)} alt={soejlerTekst(grafik.dage).join('\n')} />
             ) : (
               soejlerTekst(grafik.dage).map(l => <Text>{l}</Text>)
             )}
