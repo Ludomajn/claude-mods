@@ -75,6 +75,15 @@ export const afkort = (tekst: string, n: number): string => {
   return t.length > n ? `${t.slice(0, n - 1)}…` : t
 }
 
+// Som afkort, men skærer ved et mellemrum, så intet ord deles.
+export const afkortOrd = (tekst: string, n: number): string => {
+  const t = tekst.replace(/\s+/g, ' ').trim()
+  if (t.length <= n) return t
+  const del = t.slice(0, n - 1)
+  const ved = del.lastIndexOf(' ')
+  return `${(ved > n / 2 ? del.slice(0, ved) : del).replace(/[\s,–-]+$/, '')}…`
+}
+
 const filnavn = (sti: string) => sti.split('/').filter(Boolean).pop() ?? sti
 
 export const etiket = (navn: string, input: unknown): string => {

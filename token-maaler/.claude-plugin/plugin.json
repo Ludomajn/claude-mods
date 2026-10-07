@@ -1,1 +1,32 @@
-{ "name": "token-maaler", "version": "0.6.2", "description": "Viser hvad projektet, hver opgave og hver dag kostede i tokens og penge, og giver råd til at bruge færre", "types": "./types/index.d.ts" }
+{
+  "name": "token-maaler",
+  "version": "0.7.0",
+  "description": "Viser hvad projektet, hver opgave og hver dag kostede i tokens og penge, og giver råd til at bruge færre",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "velkomst": {
+      "type": "boolean",
+      "title": "Velkomst i nye samtaler",
+      "description": "Vis \"Bliv klogere på dit Claude forbrug\" med knappen Indsigt, indtil den første opgave er færdig.",
+      "default": true
+    },
+    "baand": {
+      "type": "boolean",
+      "title": "Bånd efter hver opgave",
+      "description": "Vis den seneste opgaves pris over prompten med knapperne Detaljer, Projekt og Råd.",
+      "default": true
+    },
+    "beskeder": {
+      "type": "boolean",
+      "title": "Beskeder",
+      "description": "Vis en kort besked efter hver opgave, og når analytikeren har et nyt råd.",
+      "default": true
+    },
+    "beskrivelser": {
+      "type": "boolean",
+      "title": "Beskrivelser af opgaver",
+      "description": "Lad Claude Haiku skrive en kort beskrivelse af hver opgave i /tokens. Sender korte uddrag af samtalen og koster under en øre pr. opgave.",
+      "default": true
+    }
+  }
+}

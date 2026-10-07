@@ -2,11 +2,13 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { KontekstDel } from '../types'
-import { afkort, analyser, dollar, etiket, kontekstDele, opsummering } from './analyse'
+import { afkort, analyser, etiket, kontekstDele, opsummering } from './analyse'
 import type { Agent, Kald, Trin } from './analyse'
 import { beskrivelsesPrompt, dagTekst, dageTekst, laesLinje, nySamling, opgaveTekst, projekt, projektTekst, renBeskrivelse, visteOpgaver } from './historik'
 import type { HistOpgave, Kilde, Projekt, Samling } from './historik'
-import { kortRaad, overheadFra, raad, raadTekst } from './raad'
+import { indsigtTekst } from './indsigt'
+import type { Resume } from './indsigt'
+import { beloeb, kortRaad, overheadFra, raad, raadTekst, REGLER } from './raad'
 import type { Grundlag, Overhead, Raad } from './raad'
 
 const opgaver = atom({ plugin: 'token-maaler', key: 'opgaver' } as const, [])
@@ -16,13 +18,21 @@ const paneNr = atom({ plugin: 'token-maaler', key: 'paneNr' } as const, null)
 const paneAntal = atom({ plugin: 'token-maaler', key: 'paneAntal' } as const, 0)
 const paneLinjer = atom({ plugin: 'token-maaler', key: 'paneLinjer' } as const, [])
 const raadListe = atom({ plugin: 'token-maaler', key: 'raad' } as const, [])
+const velkomstSkjult = atom({ plugin: 'token-maaler', key: 'velkomstSkjult' } as const, false)
 
 const PANE = 'token-maaler'
 const HISTORIK_VAERKTOEJ = 'mcp__token-maaler__historik'
 const FIRE_MB = 4 * 1024 * 1024
+// Hver samtales resume i $.store; hæv versionen, når reglerne eller resumeet ændres.
+const INDSIGT = 'indsigt:v1:'
+const HENTER = 'Samler indsigt fra alle samtaler …'
+
+// Indstillingerne fra /config (plugin.json `userConfig`); en ændring dér indlæser modulet igen.
+type Indstillinger = { velkomst: boolean; baand: boolean; beskeder: boolean; beskrivelser: boolean }
+let indstillinger: Indstillinger = { velkomst: true, baand: true, beskeder: true, beskrivelser: true }
 
 const HISTORIK_BESKRIVELSE =
-  "Token usage and cost of this project (this Claude Code session) across its whole history, read from its transcript files: total tokens and cost, every task (each message the user wrote) with its number, day and cost, the active days, and for one task what its cost went to (re-reading the conversation, tool results, thinking, subagents). Use it to answer questions such as 'what did task 7 cost?', 'what did day 2 cost?', 'which tasks were most expensive?' or 'how many days have we worked on this?'. Amounts are list prices. Without arguments it returns the project overview and the days."
+  "Token usage and cost of this project (this Claude Code session) across its whole history, read from its transcript files: total tokens and cost, every task (each message the user wrote) with its number, day and cost, the active days, and for one task what its cost went to (re-reading the conversation, tool results, thinking, subagents). Use it to answer questions such as 'what did task 7 cost?', 'what did day 2 cost?', 'which tasks were most expensive?' or 'how many days have we worked on this?'. With `alle` it covers all of the user's sessions in all projects instead. Amounts are list prices. Without arguments it returns the project overview and the days."
 
 type Spand = { trin: Trin[]; kald: Kald[]; agenter: Record<string, Agent> }
 
@@ -36,7 +46,7 @@ type Igang = Spand & {
   kontekst: Promise<KontekstDel[]>
 }
 
-type Visning = 'projekt' | 'opgave' | 'dage' | 'raad'
+type Visning = 'projekt' | 'opgave' | 'dage' | 'raad' | 'alle'
 
 const forbrug = async ($: EngineInterface) => {
   try {
@@ -122,13 +132,14 @@ const findAgenter = async ($: EngineInterface, mappe: string, soeg: string) => {
 
 const cache = new Map<string, { stoerrelse: number; mtimeMs: number; samling: Samling }>()
 
-const samlingFor = async ($: EngineInterface, sti: string, kilde: Kilde): Promise<Samling> => {
+// `husk` gemmer filen i hukommelsen til næste gang; det gør kun den aktive sessions filer.
+const samlingFor = async ($: EngineInterface, sti: string, kilde: Kilde, husk = true): Promise<Samling> => {
   const stat = await $.fs.stat(sti)
   const gemt = cache.get(sti)
   if (gemt && gemt.stoerrelse === stat.size && gemt.mtimeMs === stat.mtimeMs) return gemt.samling
   const samling = nySamling(kilde)
   await hverLinje($, sti, stat.size, linje => laesLinje(samling, linje))
-  cache.set(sti, { stoerrelse: stat.size, mtimeMs: stat.mtimeMs, samling })
+  if (husk) cache.set(sti, { stoerrelse: stat.size, mtimeMs: stat.mtimeMs, samling })
   return samling
 }
 
@@ -148,6 +159,15 @@ const kildeFor = async ($: EngineInterface, fil: string): Promise<Kilde> => {
   }
 }
 
+// Én sessions historik: hovedsamtalen og alle dens subagenter.
+const laesSession = async ($: EngineInterface, mappe: string, id: string, husk = true): Promise<Projekt | null> => {
+  const hovedfil = `${mappe}/${id}.jsonl`
+  if (!(await $.fs.exists(hovedfil))) return null
+  const samlinger = [await samlingFor($, hovedfil, { id: '', beskrivelse: '', type: '' }, husk)]
+  for (const fil of await jsonlFiler($, `${mappe}/${id}/subagents`)) samlinger.push(await samlingFor($, fil, await kildeFor($, fil), husk))
+  return { ...projekt(samlinger), id }
+}
+
 // Projektets historik: denne session, eller den session i projektmappen, hvis titel indeholder `soeg`.
 const hentProjekt = async ($: EngineInterface, soeg: string): Promise<Projekt | string> => {
   try {
@@ -164,12 +184,9 @@ const hentProjekt = async ($: EngineInterface, soeg: string): Promise<Projekt | 
       }
       maal = fundet
     }
-    const hovedfil = `${mappe}/${maal.id}.jsonl`
-    if (!(await $.fs.exists(hovedfil))) return 'Ingen historik endnu: projektets transcript er tomt.'
-    const samlinger = [await samlingFor($, hovedfil, { id: '', beskrivelse: '', type: '' })]
-    for (const fil of await jsonlFiler($, `${mappe}/${maal.id}/subagents`)) samlinger.push(await samlingFor($, fil, await kildeFor($, fil)))
-    const p = projekt(samlinger)
-    return { ...p, id: maal.id, titel: p.titel || maal.titel }
+    const p = await laesSession($, mappe, maal.id)
+    if (!p) return 'Ingen historik endnu: projektets transcript er tomt.'
+    return { ...p, titel: p.titel || maal.titel }
   } catch (fejl) {
     return `Kunne ikke læse historikken: ${fejl instanceof Error ? fejl.message : String(fejl)}`
   }
@@ -188,6 +205,7 @@ const BESKRIV_SYSTEM = 'Du skriver korte, konkrete beskrivelser af arbejde, som 
 // Hvad Claude udførte i hver opgave, skrevet af Haiku og gemt mellem sessioner. Nøglen tæller
 // opgavens kald med, så en opgave, der stadig vokser, får en ny beskrivelse næste gang.
 const beskriv = async ($: EngineInterface, p: Projekt, liste: readonly HistOpgave[]): Promise<Map<number, string>> => {
+  if (!indstillinger.beskrivelser) return new Map()
   const par = await Promise.all(
     liste.map(async (o): Promise<[number, string] | null> => {
       const noegle = `beskrivelse:v2:${p.id}:${o.t}:${o.kald}`
@@ -227,20 +245,107 @@ const raadFor = async ($: EngineInterface, p: Projekt): Promise<Raad[]> => {
   return raad(grundlag)
 }
 
+// Alle samtaler i alle projektmapper, med det, der skal til for at se, om de har ændret sig.
+const alleSessioner = async ($: EngineInterface) => {
+  const rod = await projekter($)
+  const fundne: { mappe: string; id: string; size: number; mtimeMs: number }[] = []
+  for (const m of await $.fs.list(rod).catch(() => [])) {
+    if (m.kind !== 'dir') continue
+    for (const f of await $.fs.list(`${rod}/${m.name}`).catch(() => [])) {
+      if (f.kind === 'file' && f.name.endsWith('.jsonl')) fundne.push({ mappe: `${rod}/${m.name}`, id: f.name.slice(0, -6), size: f.size, mtimeMs: f.mtimeMs })
+    }
+  }
+  return fundne
+}
+
+// Størrelse og tid på alle en mappes .jsonl-filer, også i undermapper.
+const filSpor = async ($: EngineInterface, mappe: string): Promise<{ size: number; mtimeMs: number }[]> => {
+  const spor: { size: number; mtimeMs: number }[] = []
+  for (const e of await $.fs.list(mappe).catch(() => [])) {
+    if (e.kind === 'dir') spor.push(...(await filSpor($, `${mappe}/${e.name}`)))
+    else if (e.kind === 'file' && e.name.endsWith('.jsonl')) spor.push({ size: e.size, mtimeMs: e.mtimeMs })
+  }
+  return spor
+}
+
+const titelFra = async ($: EngineInterface, mappe: string, id: string) => {
+  try {
+    const raa = await $.fs.read(`${mappe}/${id}/custom-title.json`)
+    const titel: unknown = typeof raa === 'string' ? JSON.parse(raa)?.customTitle : undefined
+    return typeof titel === 'string' ? titel : ''
+  } catch {
+    return ''
+  }
+}
+
+// En samtales resume: læses kun igen, når en af dens filer har ændret sig.
+const resumeFor = async (
+  $: EngineInterface,
+  s: { mappe: string; id: string; size: number; mtimeMs: number },
+  egen: string,
+): Promise<Resume | null> => {
+  const spor = [s, ...(await filSpor($, `${s.mappe}/${s.id}/subagents`))]
+  const signatur = `${spor.length}:${spor.reduce((n, f) => n + f.size, 0)}:${Math.max(...spor.map(f => f.mtimeMs))}`
+  const noegle = `${INDSIGT}${s.id}`
+  const gemt = (await $.store.get(noegle)) as { signatur?: unknown; resume?: Resume } | undefined
+  if (gemt?.signatur === signatur && gemt.resume) return gemt.resume
+  const p = await laesSession($, s.mappe, s.id, s.id === egen)
+  if (!p) return null
+  const liste = raad({ projekt: p, opgaver: p.opgaver.map(o => ({ o, a: analyser(o.raa) })), overhead: null })
+  const resume: Resume = {
+    id: s.id,
+    titel: p.titel || (await titelFra($, s.mappe, s.id)) || p.opgaver[0]?.tekst || 'Uden titel',
+    usd: p.usd,
+    dage: p.dage.map(d => d.dato),
+    raad: liste.map(r => ({ id: r.id, navn: r.navn, handling: r.handling, kort: r.kort, usd: r.usd })),
+  }
+  await $.store.set(noegle, { signatur, resume })
+  return resume
+}
+
+// Indsigt i hele forbruget på tværs af alle samtaler. Forbindelser og plugins kendes kun for
+// denne session, men følger med i alle nye samtaler, så det råd kommer med herfra.
+const indsigtFor = async ($: EngineInterface, visuel: boolean): Promise<string[]> => {
+  try {
+    const egen = await $.session.id()
+    for (const k of await $.store.keys()) if (k.startsWith('indsigt:') && !k.startsWith(INDSIGT)) await $.store.delete(k)
+    const resumeer: Resume[] = []
+    for (const s of await alleSessioner($)) {
+      try {
+        const r = await resumeFor($, s, egen)
+        if (r && r.usd > 0) resumeer.push(r)
+      } catch {
+        // En ulæselig samtale springes over.
+      }
+    }
+    const p = await hentProjekt($, '')
+    const ekstra =
+      typeof p === 'string'
+        ? []
+        : raad(
+            { projekt: p, opgaver: p.opgaver.map(o => ({ o, a: analyser(o.raa) })), overhead: await hentOverhead($) },
+            REGLER.filter(r => r.id === 'overhead'),
+          )
+    return indsigtTekst(resumeer, ekstra, visuel)
+  } catch (fejl) {
+    return [`Kunne ikke samle indsigten: ${fejl instanceof Error ? fejl.message : String(fejl)}`]
+  }
+}
+
 // Efter hver opgave: er der et nyt råd (eller er et gammelt blevet dobbelt så stort), vises det én gang.
 const tjekRaad = async ($: EngineInterface) => {
   try {
     const p = await hentProjekt($, '')
     if (typeof p === 'string') return
     const liste = await raadFor($, p)
-    await update($, raadListe, () => liste.map(r => ({ id: r.id, titel: r.titel, usd: r.usd })))
+    await update($, raadListe, () => liste.map(r => ({ id: r.id, titel: r.navn, usd: r.usd })))
     const noegle = `raad-vist:${p.id}`
     const gemt = await $.store.get(noegle)
     const vist = (gemt !== null && typeof gemt === 'object' ? gemt : {}) as Record<string, number>
     const nyt = liste.find(r => r.usd >= 0.5 && r.usd >= 2 * (vist[r.id] ?? 0))
-    if (!nyt) return
+    if (!nyt || !indstillinger.beskeder) return
     await $.store.set(noegle, { ...vist, [nyt.id]: nyt.usd })
-    $.ui.toast(`Råd: ${kortRaad(nyt)} (ca. ${dollar(nyt.usd)})`, { timeoutMs: 10_000 })
+    $.ui.toast(`Råd: ${kortRaad(nyt)} (ca. ${beloeb(nyt.usd)} at spare)`, { timeoutMs: 10_000 })
   } catch {
     // Et råd må aldrig forstyrre arbejdet.
   }
@@ -258,12 +363,20 @@ const tekstFor = async ($: EngineInterface, p: Projekt, visning: Visning | 'dag'
   }
   if (visning === 'dage') return dageTekst(p, visuel)
   const [stoerst] = await raadFor($, p)
-  const raadLinje = stoerst ? `Råd: ${kortRaad(stoerst)} (ca. ${dollar(stoerst.usd)}) · /tokens råd` : ''
+  const raadLinje = stoerst ? `Største råd: ${kortRaad(stoerst)} (ca. ${beloeb(stoerst.usd)}) · /tokens råd` : ''
   return projektTekst(p, visuel, await beskriv($, p, visteOpgaver(p)), raadLinje)
 }
 
 // Panelet viser samme tekst som kommandoerne; den beregnes, når en knap trykkes.
 const visPanel = async ($: EngineInterface, visning: Visning, nr: number | null) => {
+  if (visning === 'alle') {
+    // Første gang tager det nogle sekunder at læse alle samtaler; så længe står der, at den henter.
+    await update($, paneLinjer, () => [HENTER])
+    await update($, paneVisning, () => visning)
+    const linjer = await indsigtFor($, true)
+    await update($, paneLinjer, () => linjer)
+    return
+  }
   const p = await hentProjekt($, '')
   const valgt = typeof p === 'string' ? null : visning === 'opgave' ? (nr ?? p.opgaver.at(-1)?.nr ?? null) : null
   const linjer = typeof p === 'string' ? [p] : await tekstFor($, p, visning, valgt, true)
@@ -278,7 +391,25 @@ const aabnPanel = async ($: EngineInterface, kommando: string) => {
   if (!aabnet.isPlaced) $.ui.toast(`Panelet kan ikke vises her. Skriv ${kommando}.`)
 }
 
-export const register: Register = on => {
+// Panelet åbnes med det samme og fyldes, når indsigten er samlet.
+const visIndsigt = async ($: EngineInterface) => {
+  const klar = visPanel($, 'alle', null)
+  await aabnPanel($, '/tokens råd alle')
+  await klar
+}
+
+// Lidt efter sessionens start samles resumeerne, så Indsigt svarer med det samme.
+const forvarm = async ($: EngineInterface) => {
+  await indsigtFor($, false)
+}
+
+export const register: Register = (on, options) => {
+  indstillinger = {
+    velkomst: options.velkomst !== false,
+    baand: options.baand !== false,
+    beskeder: options.beskeder !== false,
+    beskrivelser: options.beskrivelser !== false,
+  }
   let aktiv: Igang | null = null
   // Subagenter i baggrunden kan blive færdige mellem to opgaver; deres forbrug går til den næste.
   let ventende: Spand = { trin: [], kald: [], agenter: {} }
@@ -289,7 +420,7 @@ export const register: Register = on => {
   const spand = (): Spand => aktiv ?? ventende
 
   on('session.start', async ($, e, next) => {
-    await $.command.register({ name: 'tokens', description: 'Hele projektets forbrug: /tokens · én opgave: /tokens <nr> · dagene: /tokens dage' })
+    await $.command.register({ name: 'tokens', description: 'Projektet: /tokens · én opgave: /tokens <nr> · dage: /tokens dage · råd: /tokens råd · alle samtaler: /tokens råd alle' })
     try {
       await $.tool.register({
         name: 'historik',
@@ -301,12 +432,17 @@ export const register: Register = on => {
             dag: { type: 'integer', minimum: 1, description: 'An active day number (1 = the first active day), for that day in detail.' },
             agent: { type: 'string', description: "Part of another session's title in the same project folder, to look at that session instead." },
             raad: { type: 'boolean', description: 'True for advice on how to use fewer tokens, each with an estimated saving and what to do.' },
+            alle: {
+              type: 'boolean',
+              description: "True for insight across all of the user's sessions in all projects: total cost, the most expensive sessions and advice across them.",
+            },
           },
         },
       })
     } catch {
       // Uden plugin-værktøjer virker kommandoen stadig.
     }
+    $.clock.after(20_000, () => void forvarm($))
     return next(e)
   })
 
@@ -361,6 +497,7 @@ export const register: Register = on => {
     // Historik-værktøjet, som modellen kan kalde, besvares her.
     if (String(e.tool) === HISTORIK_VAERKTOEJ) {
       const input = e as unknown as Record<string, unknown>
+      if (input.alle === true) return { result: (await indsigtFor($, false)).join('\n') }
       const heltal = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? Math.trunc(v) : null)
       const opgave = heltal(input.opgave)
       const dag = heltal(input.dag)
@@ -415,7 +552,7 @@ export const register: Register = on => {
       const sidste = igang.trin.filter(t => t.loop === '').at(-1)
       if (sidste) forrigePrompt = sidste.input + sidste.cacheLaes + sidste.cacheSkriv
       await update($, opgaver, liste => [...liste, opgave].slice(-50))
-      $.ui.toast(`Seneste opgave: ${opsummering(opgave)} · /tokens`)
+      if (indstillinger.beskeder) $.ui.toast(`Seneste opgave: ${opsummering(opgave)} · /tokens`)
       // Analytikeren kigger på hele projektet lidt efter, når transcriptet er skrevet færdigt.
       $.clock.after(3_000, () => void tjekRaad($))
     } catch {
@@ -428,6 +565,9 @@ export const register: Register = on => {
     const ord = e.args.trim().split(/\s+/).filter(Boolean)
     const [foerste = '', ...rest] = ord
     await update($, skjult, () => false)
+    if (((foerste === 'råd' || foerste === 'raad') && rest.join(' ') === 'alle') || foerste === 'indsigt') {
+      return { text: (await indsigtFor($, true)).join('\n') }
+    }
     if (foerste === 'dag') {
       const nr = Number.parseInt(rest[0] ?? '', 10)
       if (Number.isNaN(nr)) return { text: 'Skriv fx /tokens dag 2.' }
@@ -447,10 +587,22 @@ export const register: Register = on => {
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    if (e.props.hasSurvey) return next(e)
     const sidste = (await read($, opgaver)).at(-1)
-    if (e.props.hasSurvey || !sidste || (await read($, skjult))) return next(e)
-
     const { Box, Button, Text } = $.ui.resolve(e)
+
+    // En ny samtale, før den første opgave er målt: en indgang til indsigten i hele forbruget.
+    if (!sidste) {
+      if (!indstillinger.velkomst || (await read($, velkomstSkjult))) return next(e)
+      return (
+        <Box>
+          <Text dimColor>Bliv klogere på dit Claude forbrug </Text>
+          <Button key="indsigt" label="Indsigt" onPress={() => visIndsigt($)} />
+          <Button key="skjul" label="Skjul" onPress={() => update($, velkomstSkjult, () => true)} />
+        </Box>
+      )
+    }
+    if (!indstillinger.baand || (await read($, skjult))) return next(e)
     const raadAntal = (await read($, raadListe)).length
 
     return (
@@ -487,15 +639,32 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Button, Text } = $.ui.resolve(e)
-    // En bjælkelinje får farvet bjælke; alle andre linjer vises som tekst.
-    const vis = (linje: string) => {
+    type Stil = { dimColor?: true; color?: string }
+    // **fed** vises fed og `kode` i farve; resten i linjens egen stil.
+    const dele = (tekst: string, stil: Stil) =>
+      tekst
+        .split(/(\*\*[^*]+\*\*|`[^`]+`)/)
+        .filter(Boolean)
+        .map(d =>
+          d.startsWith('**') ? (
+            <Text bold {...stil}>{d.slice(2, -2)}</Text>
+          ) : d.startsWith('`') ? (
+            <Text color="cyan">{d.slice(1, -1)}</Text>
+          ) : (
+            <Text {...stil}>{d}</Text>
+          ),
+        )
+    // En bjælke står i farve. Under en overskrift er forklaringen dæmpet, og handlingen (→) er grøn.
+    const vis = (linje: string, i: number, alle: readonly string[]) => {
       const [, fyldt = '', tom = '', rest = ''] = /^(█*)(░*)(.*)$/.exec(linje) ?? []
-      if (fyldt === '' && tom === '') return <Text>{linje || ' '}</Text>
+      const forrige = alle[i - 1] ?? ''
+      const underOverskrift = fyldt === '' && tom === '' && /^(█*░*\s?)\*\*/.test(forrige) && !rest.startsWith('**')
+      const stil: Stil = rest.startsWith('→') ? { color: 'green' } : underOverskrift ? { dimColor: true } : {}
       return (
         <Box>
           {fyldt !== '' && <Text color="cyan">{fyldt}</Text>}
           {tom !== '' && <Text dimColor>{tom}</Text>}
-          <Text>{rest || ' '}</Text>
+          {rest === '' ? <Text> </Text> : dele(rest, stil)}
         </Box>
       )
     }
@@ -505,12 +674,13 @@ export const register: Register = on => {
     const linjer = await read($, paneLinjer)
 
     return (
-      <Box flexDirection="column">
+      <Box flexDirection="column" paddingX={1} paddingY={1}>
         {(linjer.length ? linjer : ['Tryk Projekt for at hente forbruget.']).map(vis)}
-        <Box>
+        <Box marginTop={1} gap={1}>
           <Button key="projekt" label="Projekt" onPress={() => visPanel($, 'projekt', null)} />
           <Button key="dage" label="Dage" onPress={() => visPanel($, 'dage', null)} />
           <Button key="raad" label="Råd" onPress={() => visPanel($, 'raad', null)} />
+          <Button key="indsigt" label="Indsigt" onPress={() => visPanel($, 'alle', null)} />
           {visning === 'opgave' && nr !== null && nr > 1 && (
             <Button key="forrige" label="‹ Forrige" onPress={() => visPanel($, 'opgave', nr - 1)} />
           )}

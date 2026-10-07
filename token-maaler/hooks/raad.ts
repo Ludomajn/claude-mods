@@ -1,13 +1,20 @@
 import type { Opgave, PostType } from '../types'
-import { bjaelke, dollar, fmt, pris, procent } from './analyse'
+import { afkortOrd, bjaelke, dollar, fmt, pris, procent } from './analyse'
 import type { HistOpgave, Projekt } from './historik'
 
-// Ét råd fra analytikeren: hvad den så (kort), hvad man gør, og hvad det cirka kunne have sparet.
+// Ét råd fra analytikeren, vist på højst tre linjer: navn og beløb, hvad den så, og hvad man gør.
 export type Raad = {
   id: string
-  titel: string
-  skridt: string
+  // Kort navn uden tal, fx "Lang samtale".
+  navn: string
+  // Hvad analytikeren så, med tal fra projektet.
+  hvorfor: string
+  // Hvad man gør, og hvorfor det hjælper. Må indeholde `kode`.
+  handling: string
+  // Handlingen i få ord, til beskeder og /tokens.
+  kort: string
   usd: number
+  // Konkrete steder, det skete; kun til Claude via værktøjet.
   eksempler: string[]
 }
 
@@ -53,8 +60,10 @@ const langSamtale: Regel = {
     return [
       {
         id: 'lang-samtale',
-        titel: `Lang samtale (${fmt(stoerst)} tokens)`,
-        skridt: '/compact efter hver færdig opgave',
+        navn: 'Lang samtale',
+        hvorfor: `Samtalen nåede ${fmt(stoerst)} tokens, og hver runde læste den hele igen.`,
+        handling: 'Skriv `/compact`, når en opgave er færdig, så hver runde læser mindre.',
+        kort: '/compact efter hver færdig opgave',
         usd,
         eksempler: flest(lange, x => x.usd).map(x => `opgave ${x.o.nr}: ${fmt(x.a.startKontekst)} tokens × ${x.a.runder} runder (ca. ${dollar(x.usd)} at spare)`),
       },
@@ -69,13 +78,16 @@ const pauser: Regel = {
       .map(({ o, a }) => ({ o, a, posten: a.poster.find(p => p.type === 'cache') }))
       .filter(x => x.posten !== undefined)
       .map(x => ({ ...x, kostede: x.posten?.usd ?? 0, tokens: x.posten?.tokens ?? 0 }))
+    const kostede = sum(ramte, x => x.kostede)
     const usd = sum(ramte, x => x.kostede * sparet(x.tokens))
     if (usd < MINDST) return []
     return [
       {
         id: 'pauser',
-        titel: `Pauser (cachen udløb ${ramte.length === 1 ? '1 gang' : `${ramte.length} gange`})`,
-        skridt: '/compact før en pause',
+        navn: 'Pauser',
+        hvorfor: `Cachen udløb ${ramte.length === 1 ? '1 gang' : `${ramte.length} gange`} under pauser, og hele samtalen blev gemt igen for ${dollar(kostede)}.`,
+        handling: 'Skriv `/compact` før en lang pause, så der er mindre at gemme igen.',
+        kort: '/compact før en pause',
         usd,
         eksempler: flest(ramte, x => x.kostede).map(x => `opgave ${x.o.nr}: ${fmt(x.tokens)} tokens skrevet igen (${dollar(x.kostede)})`),
       },
@@ -96,8 +108,10 @@ const storeResultater: Regel = {
     return [
       {
         id: 'store-resultater',
-        titel: `Store værktøjsresultater (${store.length} kald)`,
-        skridt: 'bed om udsnit, ikke hele filer',
+        navn: 'Store værktøjsresultater',
+        hvorfor: `${store.length === 1 ? '1 værktøjskald' : `${store.length} værktøjskald`} gav over 5k tokens, størst ${flest(store, x => x.p.tokens, 1).map(x => `${afkortOrd(x.p.navn, 36)} (${fmt(x.p.tokens)})`).join('')}.`,
+        handling: 'Bed om bestemte linjer eller en søgning frem for hele filer og lange output.',
+        kort: 'bed om udsnit, ikke hele filer',
         usd,
         eksempler: flest(store, x => x.usd).map(x => `opgave ${x.o.nr}: ${x.p.navn} (${fmt(x.p.tokens)}, ${dollar(x.usd)})`),
       },
@@ -116,8 +130,10 @@ const taenkning: Regel = {
     return [
       {
         id: 'taenkning',
-        titel: `Tænkning (${procent(kostede / g.projekt.usd)} af prisen)`,
-        skridt: 'lavere effort til rutineopgaver',
+        navn: 'Tænkning',
+        hvorfor: `Claude tænkte for ${dollar(kostede)}, ${procent(kostede / g.projekt.usd)} af prisen.`,
+        handling: 'Sæt effort lavere til rutineopgaver, og hæv den igen til svære opgaver.',
+        kort: 'lavere effort til rutineopgaver',
         usd,
         eksempler: flest(pr, x => x.usd).map(x => `opgave ${x.o.nr}: tænkning for ${dollar(x.usd)}`),
       },
@@ -135,8 +151,10 @@ const subagenter: Regel = {
     return [
       {
         id: 'subagenter',
-        titel: `Subagenter (${procent(kostede / g.projekt.usd)} af prisen)`,
-        skridt: 'giv dem smallere opgaver',
+        navn: 'Subagenter',
+        hvorfor: `Subagenter kostede ${dollar(kostede)}, ${procent(kostede / g.projekt.usd)} af prisen.`,
+        handling: 'Giv hver subagent en præcis opgave: hvilke filer og hvilket spørgsmål.',
+        kort: 'giv subagenter smallere opgaver',
         usd,
         eksempler: flest(poster, x => x.p.usd ?? 0).map(x => `opgave ${x.o.nr}: ${x.p.navn} (${dollar(x.p.usd ?? 0)})`),
       },
@@ -157,8 +175,10 @@ const rutine: Regel = {
     return [
       {
         id: 'rutine',
-        titel: 'Commit og push i lang samtale',
-        skridt: 'tag dem efter /compact',
+        navn: 'Commit og push i lang samtale',
+        hvorfor: `${ramte.length === 1 ? '1 kort opgave' : `${ramte.length} korte opgaver`} kostede ${dollar(sum(ramte, x => x.o.usd))}, fordi hele samtalen blev læst med.`,
+        handling: 'Tag commit og push efter `/compact` eller i en ny samtale.',
+        kort: 'commit og push efter /compact',
         usd,
         eksempler: flest(ramte, x => x.o.usd).map(x => `opgave ${x.o.nr}: "${x.o.tekst}" (${dollar(x.o.usd)})`),
       },
@@ -185,8 +205,10 @@ const overhead: Regel = {
     return [
       {
         id: 'overhead',
-        titel: `Plugins og forbindelser (${fmt(tokens)} pr. runde)`,
-        skridt: `slå ubrugte fra, fx ${flest(dele, d => d.tokens, 1).map(d => d.navn).join('')}`,
+        navn: 'Plugins og forbindelser',
+        hvorfor: `${fmt(tokens)} tokens følger med i hver runde, mest ${flest(dele, d => d.tokens, 1).map(d => `${d.navn} (${fmt(d.tokens)})`).join('')}.`,
+        handling: 'Slå de plugins og forbindelser fra, som du ikke bruger. Det virker fra næste samtale.',
+        kort: `slå ubrugte fra, fx ${flest(dele, d => d.tokens, 1).map(d => d.navn).join('')}`,
         usd,
         eksempler: flest(dele, d => d.tokens, 5).map(d => `${d.navn}${d.slags}: ${fmt(d.tokens)} tokens`),
       },
@@ -241,17 +263,35 @@ export const overheadFra = (
   }
 }
 
-// Rådet på én linje: "Lang samtale (879k tokens) → /compact efter hver færdig opgave".
-export const kortRaad = (r: Pick<Raad, 'titel' | 'skridt'>): string => `${r.titel} → ${r.skridt}`
+// Beløb i rådene er skøn; over $10 vises de i hele dollars.
+export const beloeb = (usd: number): string => (usd >= 10 ? `$${Math.round(usd)}` : dollar(usd))
 
-// Én linje pr. råd. Uden bjælker (til Claude via værktøjet) kommer eksemplerne med, så Claude kan svare på hvorfor.
+// Så mange råd vises; resten samles på én linje.
+export const MEST = 5
+
+// Rådet på én linje, til beskeder og /tokens: "Lang samtale → /compact efter hver færdig opgave".
+export const kortRaad = (r: Pick<Raad, 'navn' | 'kort'>): string => `${r.navn} → ${r.kort}`
+
+// Ét råd på tre linjer: bjælke, beløb og navn; hvad der skete; hvad man gør.
+export const raadBlok = (
+  r: Pick<Raad, 'navn' | 'handling' | 'usd'>,
+  hvorfor: string,
+  andel: number,
+  visuel: boolean,
+  tillaeg = '',
+): string[] => [`${visuel ? `${bjaelke(andel, 10)} ` : ''}**${beloeb(r.usd)} · ${r.navn}**${tillaeg}`, hvorfor, `→ ${r.handling}`]
+
+export const restLinje = (rest: readonly { usd: number }[]): string[] =>
+  rest.length === 0 ? [] : ['', `Plus ${rest.length === 1 ? '1 mindre råd' : `${rest.length} mindre råd`} for i alt ${beloeb(sum(rest, r => r.usd))}.`]
+
+// Rådene som blokke med en tom linje imellem. Uden bjælker (til Claude) følger eksemplerne med.
 export const raadTekst = (titel: string, liste: readonly Raad[], visuel = true): string[] => {
   if (liste.length === 0) return [`Ingen råd til ${titel} lige nu.`]
   const stoerst = liste[0]?.usd ?? 0
-  const linjer = [`Råd · ${titel} · skønnet besparelse`, '']
-  for (const r of liste) {
-    if (visuel) linjer.push(`${bjaelke(stoerst > 0 ? r.usd / stoerst : 0, 10)} ${dollar(r.usd).padEnd(6)} ${kortRaad(r)}`)
-    else linjer.push(`${dollar(r.usd)}: ${kortRaad(r)}`, ...(r.eksempler.length > 0 ? [`  Fx ${r.eksempler.join('; ')}`] : []))
+  const ud = ['**Råd til at bruge færre tokens**', `${titel} · beløb = hvad du cirka kunne have sparet`]
+  for (const r of liste.slice(0, MEST)) {
+    ud.push('', ...raadBlok(r, r.hvorfor, stoerst > 0 ? r.usd / stoerst : 0, visuel))
+    if (!visuel && r.eksempler.length > 0) ud.push(`Fx ${r.eksempler.join('; ')}`)
   }
-  return linjer
+  return [...ud, ...restLinje(liste.slice(MEST))]
 }

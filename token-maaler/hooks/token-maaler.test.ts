@@ -106,11 +106,100 @@ test('en live-målt opgave vises i båndet og som besked', async ($, on) => {
   expect(aabnet).toEqual(['token-maaler', 'token-maaler'])
 })
 
-test('båndet er skjult, før en opgave er målt', async ($, on) => {
+test('en ny samtale viser velkomsten med Indsigt, til Skjul trykkes', async ($, on) => {
   mock.clock(on)
   on('ui.render', async () => ({ type: 'Box', props: {}, children: [] }) as never)
   const baand = await $.ui.mount({ plugin: 'token-maaler', surface: 'desktop', component: 'AbovePrompt', props: baandProps } as never)
   expect(await baand.find({ text: /Sidste opgave/ })).toBeUndefined()
+  expect(await baand.find({ type: 'Text', text: /^Bliv klogere på dit Claude forbrug/ })).toBeDefined()
+  expect((await baand.find({ key: 'indsigt' }))?.props.label).toBe('Indsigt')
+  await baand.press({ key: 'skjul' })
+  expect(await baand.find({ type: 'Text', text: /Bliv klogere/ })).toBeUndefined()
+  await baand.unmount()
+})
+
+test('indstillingerne i /config kan slå velkomsten fra', { options: { velkomst: false } }, async ($, on) => {
+  mock.clock(on)
+  on('ui.render', async () => ({ type: 'Box', props: {}, children: [] }) as never)
+  const baand = await $.ui.mount({ plugin: 'token-maaler', surface: 'desktop', component: 'AbovePrompt', props: baandProps } as never)
+  expect(await baand.find({ type: 'Text', text: /Bliv klogere/ })).toBeUndefined()
+  await baand.unmount()
+})
+
+// To projektmapper med hver sin samtale; den lange samtale giver et råd om /compact.
+// En sti i `laaste` kan ikke læses, så det kan ses, at et resume kommer fra $.store.
+const toMapper = (on: On, laaste: Set<string>) => {
+  mock.env(on, { HOME: '/h' })
+  const rod = '/h/.claude/projects'
+  const filer: Record<string, string> = {
+    [`${rod}/-p-x/s1.jsonl`]: transcript,
+    [`${rod}/-p-y/s2.jsonl`]: [JSON.stringify({ type: 'custom-title', customTitle: 'Bæverspil' }), langTranscript].join('\n'),
+  }
+  on('session.id', async () => ({ value: 's1' }))
+  on('session.cwd', async () => ({ value: '/p/x' }))
+  on('session.usage', async () => ({ value: { startedAt: 0, context: { window: 1_000_000 }, rateLimits: [], cost: { usd: 0 } } as never }))
+  on('fs.exists', async (_, e) => ({ value: e.path in filer || [`${rod}/-p-x`, `${rod}/-p-y`].includes(e.path) }))
+  on('fs.list', async (_, e) => ({
+    value: (e.path === rod
+      ? [{ name: '-p-x', kind: 'dir', size: 0, mtimeMs: 0 }, { name: '-p-y', kind: 'dir', size: 0, mtimeMs: 0 }]
+      : Object.keys(filer).filter(f => f.startsWith(`${e.path}/`) && !f.slice(e.path.length + 1).includes('/')).map(f => ({ name: f.split('/').pop(), kind: 'file', size: (filer[f] ?? '').length, mtimeMs: 1 }))) as never,
+  }))
+  on('fs.stat', async (_, e) => ({ value: { kind: 'file', size: (filer[e.path] ?? '').length, mtimeMs: 1, isLink: false } }))
+  on('fs.read', async (_, e) => {
+    const tekst = filer[e.path]
+    if (tekst === undefined || laaste.has(e.path)) throw new Error('kan ikke læses')
+    return { value: tekst }
+  })
+}
+
+test('/tokens råd alle samler alle samtaler i alle projektmapper og husker resumeerne', async ($, on) => {
+  mock.clock(on)
+  mock.store(on)
+  const laaste = new Set<string>()
+  toMapper(on, laaste)
+  const aabnet: string[] = []
+  on('ui.open', async (_, e) => {
+    aabnet.push(e.id)
+    return { value: { isPlaced: true } as never }
+  })
+
+  const tekst = (await $.command.run({ command: 'tokens', args: 'råd alle' } as never)).text ?? ''
+  const linjer = tekst.split('\n')
+  expect(linjer.slice(0, 8)).toEqual([
+    '**Indsigt i dit Claude-forbrug**',
+    expect.stringMatching(/^2 samtaler · 3 aktive dage · \$\d+\.\d+ i alt$/),
+    '',
+    '**Råd på tværs** · beløb = hvad du cirka kunne have sparet',
+    '',
+    '██████████ **$0.68 · Lang samtale** · 1 samtale',
+    'I Bæverspil ($0.68).',
+    '→ Skriv `/compact`, når en opgave er færdig, så hver runde læser mindre.',
+  ])
+  expect(linjer.slice(-3)).toEqual([
+    '**Dyreste samtaler**',
+    expect.stringMatching(/^██████████ \$\d+\.\d+ · Bæverspil$/),
+    expect.stringMatching(/^█░+ \$\d+\.\d+ · Webshop-agent$/),
+  ])
+  // Bæverspil er uændret, så dens resume hentes fra $.store i stedet for at læse filen igen.
+  laaste.add('/h/.claude/projects/-p-y/s2.jsonl')
+  expect((await $.command.run({ command: 'tokens', args: 'indsigt' } as never)).text).toBe(tekst)
+
+  const vaerktoej = $.tool.call as unknown as (input: Record<string, unknown>) => Promise<{ result?: unknown }>
+  const svar = String((await vaerktoej({ tool: 'mcp__token-maaler__historik', alle: true })).result)
+  expect(svar).toContain('**$0.68 · Lang samtale** · 1 samtale\nI Bæverspil ($0.68).')
+  expect(svar).not.toContain('█')
+
+  const baand = await $.ui.mount({ plugin: 'token-maaler', surface: 'desktop', component: 'AbovePrompt', props: baandProps } as never)
+  await baand.press({ key: 'indsigt' })
+  await baand.unmount()
+  expect(aabnet).toEqual(['token-maaler'])
+  const panel = await $.ui.mount({ plugin: 'token-maaler', surface: 'desktop', component: 'Pane', requestId: 'token-maaler', props: panelProps } as never)
+  // Overskriften er fed, forklaringen under et råd dæmpet, handlingen grøn og kommandoen i farve.
+  expect((await panel.find({ type: 'Text', text: /^Indsigt i dit Claude-forbrug$/ }))?.props.bold).toBe(true)
+  expect((await panel.find({ type: 'Text', text: /^I Bæverspil/ }))?.props.dimColor).toBe(true)
+  expect((await panel.find({ type: 'Text', text: /^→ Skriv / }))?.props.color).toBe('green')
+  expect((await panel.find({ type: 'Text', text: /^\/compact$/ }))?.props.color).toBe('cyan')
+  await panel.unmount()
 })
 
 const linje = (type: string, tid: string, felter: object) => JSON.stringify({ type, timestamp: tid, ...felter })
@@ -238,7 +327,7 @@ test('analytikeren giver et råd efter en opgave i en lang samtale og gentager d
   }
 
   await enOpgave('t1')
-  expect(raadToasts()).toEqual(['Råd: Lang samtale (400k tokens) → /compact efter hver færdig opgave (ca. $0.68)'])
+  expect(raadToasts()).toEqual(['Råd: Lang samtale → /compact efter hver færdig opgave (ca. $0.68 at spare)'])
 
   const baand = await $.ui.mount({ plugin: 'token-maaler', surface: 'desktop', component: 'AbovePrompt', props: baandProps } as never)
   expect((await baand.find({ key: 'raad' }))?.props.label).toBe('Råd (1)')
@@ -249,6 +338,6 @@ test('analytikeren giver et råd efter en opgave i en lang samtale og gentager d
   expect(raadToasts()).toHaveLength(1)
 
   const tekst = (await $.command.run({ command: 'tokens', args: 'råd' } as never)).text ?? ''
-  expect(tekst).toContain('Råd · ')
-  expect(tekst).toContain('→ /compact efter hver færdig opgave')
+  expect(tekst).toContain('**Råd til at bruge færre tokens**')
+  expect(tekst).toContain('→ Skriv `/compact`, når en opgave er færdig')
 })

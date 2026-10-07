@@ -47,7 +47,8 @@ declare module 'claude-code' {
     'token-maaler': {
       opgaver: Opgave[]
       skjult: boolean
-      paneVisning: 'projekt' | 'opgave' | 'dage' | 'raad'
+      velkomstSkjult: boolean
+      paneVisning: 'projekt' | 'opgave' | 'dage' | 'raad' | 'alle'
       paneNr: number | null
       paneAntal: number
       paneLinjer: string[]

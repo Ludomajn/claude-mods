@@ -9,6 +9,8 @@ Viser, hvad projektet, hver opgave og hver dag kostede i tokens og dollars, og h
 - Efter hver opgave vises et bånd over prompten med knapperne **Detaljer** og **Projekt**.
 - Du kan også spørge Claude, fx "hvad kostede opgave 4?" eller "hvor mange dage har vi arbejdet på det her?".
 - `/tokens råd` viser analytikerens råd til at bruge færre tokens, hver med et skøn over, hvad det kunne have sparet. Efter en opgave får du en besked, når der er et nyt råd, og båndet får knappen **Råd**.
+- `/tokens råd alle` (eller knappen **Indsigt**) samler alle dine samtaler i alle projekter: forbruget i alt, rådene på tværs og de dyreste samtaler. I en ny samtale står "Bliv klogere på dit Claude forbrug" over prompten med knappen **Indsigt**.
+- Hvert råd står på højst tre linjer: hvad det kunne have sparet, hvad analytikeren så, og hvad du kan gøre.
 
 Mod'en læser sessionens egne tal og transcript-filer på din egen maskine. For at beskrive opgaverne sender den korte uddrag (din besked, Claudes svar og hvilke filer der blev rørt) til Claude Haiku over samme forbindelse som samtalen; hver beskrivelse gemmes, så det sker én gang pr. opgave og koster under en øre. Ellers sender den intet ud.
 
@@ -16,19 +18,30 @@ Mod'en læser sessionens egne tal og transcript-filer på din egen maskine. For 
 
 Kræver en ny version af Claude Code (testet på 2.1.289) på macOS eller Linux.
 
-1. Læg mappen `token-maaler` et fast sted, fx `~/claude-mods/token-maaler` (pak zip-filen ud, eller klon repoet).
-2. Åbn `~/.claude/settings.json` og tilføj stien under `"env"`:
+**Som plugin (anbefalet).** Mappen `claude-mods` er et plugin-katalog. Har du adgang til GitHub-repoet, så kør:
 
-   ```json
-   "env": {
-     "CLAUDE_CODE_PLUGIN_DIRS": "/Users/DIT-BRUGERNAVN/claude-mods/token-maaler"
-   }
-   ```
+```bash
+claude plugin marketplace add Ludomajn/claude-mods
+```
 
-   Findes filen ikke, så opret den med de linjer inde i `{ }`. Har du allerede `CLAUDE_CODE_PLUGIN_DIRS`, så sæt stierne efter hinanden med `:` imellem.
-3. Genstart Claude-appen. Skriv `/tokens` for at se, at den kører.
+Har du fået mappen som zip, så pak den ud og giv stien i stedet, fx `claude plugin marketplace add ~/claude-mods`. Installér derefter:
 
-Kun én terminal-session: `claude --plugin-dir token-maaler-0.4.0.zip`
+```bash
+claude plugin install token-maaler@claude-mods
+```
+
+I Claude-appen kan du også installere den under **+** ved prompten → **Plugins** → **Add plugin**, når kataloget er tilføjet. Genstart appen, og skriv `/tokens`.
+
+**Uden katalog.** Læg mappen `token-maaler` et fast sted, og tilføj stien i `~/.claude/settings.json` under `"env"`: `"CLAUDE_CODE_PLUGIN_DIRS": "/Users/DIT-BRUGERNAVN/claude-mods/token-maaler"`. Har du allerede stier dér, så sæt dem efter hinanden med `:` imellem.
+
+## Indstillinger
+
+Under `/config` står mod'ens indstillinger; alle er slået til fra start:
+
+- **Velkomst i nye samtaler**: "Bliv klogere på dit Claude forbrug" med knappen Indsigt.
+- **Bånd efter hver opgave**: prisen på den seneste opgave over prompten.
+- **Beskeder**: en kort besked efter hver opgave og ved nye råd.
+- **Beskrivelser af opgaver**: Claude Haiku skriver en kort beskrivelse af hver opgave. Slå den fra, hvis intet fra samtalen må sendes til en beskrivelse.
 
 ## Sådan regnes det
 
@@ -49,4 +62,4 @@ Efter hver opgave gennemgår analytikeren hele projektet. Et nyt råd (eller et,
 
 ### Sådan tilføjer du et råd
 
-Reglerne står i `hooks/raad.ts`. En regel er en funktion, der får projektet og hver opgaves analyse og giver nul eller flere råd tilbage (titel, tekst, hvad man kan gøre, eksempler og et skøn i dollars). Skriv funktionen, og sæt den i listen `REGLER`. Notifikationer, `/tokens råd`, panelet og Claudes værktøj bruger den så automatisk.
+Reglerne står i `hooks/raad.ts`. En regel er en funktion, der får projektet og hver opgaves analyse og giver nul eller flere råd tilbage: `navn` (få ord), `hvorfor` (hvad der skete, med tal), `handling` (hvad man gør, og hvorfor det hjælper), `kort` (handlingen i få ord til beskeder), `eksempler` og et skøn i dollars. Skriv funktionen, og sæt den i listen `REGLER`. Beskeder, `/tokens råd`, Indsigt på tværs af samtaler, panelet og Claudes værktøj bruger den så automatisk. Hæv `INDSIGT`-versionen i `hooks/register.tsx`, så gemte resumeer regnes igen.
