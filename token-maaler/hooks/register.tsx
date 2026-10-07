@@ -8,6 +8,8 @@ import { beskrivelsesPrompt, dagTekst, dageTekst, laesLinje, nySamling, opgaveTe
 import type { HistOpgave, Kilde, Projekt, Samling } from './historik'
 import { indsigtTekst } from './indsigt'
 import type { Resume } from './indsigt'
+import { KVARTER, median, saetEnhed, VINDUER } from './enhed'
+import type { Maaling } from './enhed'
 import {
   ANALYSE_SYSTEM,
   analysePrompt,
@@ -38,7 +40,7 @@ const PANE = 'token-maaler'
 const HISTORIK_VAERKTOEJ = 'mcp__token-maaler__historik'
 const FIRE_MB = 4 * 1024 * 1024
 // Hver samtales resume i $.store; hæv versionen, når reglerne eller resumeet ændres.
-const INDSIGT = 'indsigt:v3:'
+const INDSIGT = 'indsigt:v4:'
 const HENTER = 'Samler indsigt fra alle samtaler …'
 // Hver samtales Dine prompts-forslag i $.store; hæv versionen, når prompterne til modellerne ændres.
 const PROMPTSMART = 'promptsmart:v2:'
@@ -47,6 +49,12 @@ const PROMPTSMART_SAMTALER = 8
 
 // Indstillingerne fra /config (plugin.json `userConfig`); en ændring dér indlæser modulet igen.
 type Indstillinger = { velkomst: boolean; baand: boolean; beskeder: boolean; beskrivelser: boolean; promptsmart: boolean }
+
+// Målingerne af abonnementets grænser: listepris pr. procentpoint, de seneste ti pr. vindue.
+const KALIBRERING = 'kalibrering:v1'
+type Vindue = keyof typeof VINDUER
+type Kalibrering = Partial<Record<Vindue, Maaling[]>>
+type Graense = { kind: string; percentUsed: number; resetsAt?: string }
 let indstillinger: Indstillinger = { velkomst: true, baand: true, beskeder: true, beskrivelser: true, promptsmart: true }
 
 const HISTORIK_BESKRIVELSE =
@@ -315,6 +323,7 @@ const resumeFor = async (
     titel: p.titel || (await titelFra($, s.mappe, s.id)) || p.opgaver[0]?.tekst || 'Uden titel',
     usd: p.usd,
     dage: p.dage.map(d => d.dato),
+    kvarterer: p.kvarterer,
     raad: liste.map(r => ({ id: r.id, navn: r.navn, handling: r.handling, kort: r.kort, usd: r.usd })),
   }
   await $.store.set(noegle, { signatur, resume })
@@ -549,9 +558,49 @@ const visPromptsmart = async ($: EngineInterface) => {
   await klar
 }
 
+const indlaesEnhed = async ($: EngineInterface) => {
+  const k = ((await $.store.get(KALIBRERING)) ?? {}) as Kalibrering
+  saetEnhed({ uge: median(k.seven_day ?? []), fem: median(k.five_hour ?? []) })
+}
+
+const erVindue = (kind: string): kind is Vindue => kind in VINDUER
+
+let sidstKalibreret = -Infinity
+
+// Grænsernes procent sammenholdt med forbruget i alle transcripts siden vinduets start: så meget
+// listepris svarer ét procentpoint til. Højst hvert tiende minut, og kun når procenten er høj nok.
+const kalibrer = async ($: EngineInterface, graenser: readonly Graense[]) => {
+  try {
+    const nu = await $.clock.now()
+    const brugbare = graenser.filter(g => erVindue(g.kind) && g.resetsAt !== undefined && g.percentUsed >= VINDUER[g.kind].mindst)
+    if (brugbare.length === 0 || nu - sidstKalibreret < 10 * 60_000) return
+    sidstKalibreret = nu
+    const egen = await $.session.id()
+    const resumeer: Resume[] = []
+    for (const s of await alleSessioner($)) {
+      const r = await resumeFor($, s, egen).catch(() => null)
+      if (r) resumeer.push(r)
+    }
+    const k = ((await $.store.get(KALIBRERING)) ?? {}) as Kalibrering
+    for (const g of brugbare) {
+      if (!erVindue(g.kind)) continue
+      const start = Math.floor((Date.parse(g.resetsAt ?? '') - VINDUER[g.kind].ms) / KVARTER)
+      if (Number.isNaN(start)) continue
+      let usd = 0
+      for (const r of resumeer) for (const [n, v] of Object.entries(r.kvarterer ?? {})) if (Number(n) >= start) usd += v
+      if (usd > 0) k[g.kind] = [...(k[g.kind] ?? []), { t: nu, usdPrProcent: usd / g.percentUsed }].slice(-10)
+    }
+    await $.store.set(KALIBRERING, k)
+    await indlaesEnhed($)
+  } catch {
+    // Uden en måling vises kroner.
+  }
+}
+
 // Lidt efter sessionens start samles resumeerne, så Indsigt svarer med det samme.
 const forvarm = async ($: EngineInterface) => {
   await indsigtFor($, false)
+  await kalibrer($, (await $.session.usage()).rateLimits)
 }
 
 export const register: Register = (on, options) => {
@@ -562,6 +611,7 @@ export const register: Register = (on, options) => {
     beskrivelser: options.beskrivelser !== false,
     promptsmart: options.promptsmart !== false,
   }
+  saetEnhed({ kurs: typeof options.kurs === 'number' && options.kurs > 0 ? options.kurs : 6.5, uge: null, fem: null })
   let aktiv: Igang | null = null
   // Subagenter i baggrunden kan blive færdige mellem to opgaver; deres forbrug går til den næste.
   let ventende: Spand = { trin: [], kald: [], agenter: {} }
@@ -600,7 +650,17 @@ export const register: Register = (on, options) => {
     } catch {
       // Uden plugin-værktøjer virker kommandoen stadig.
     }
+    await indlaesEnhed($)
     $.clock.after(20_000, () => void forvarm($))
+    return next(e)
+  })
+
+  // Når en grænse flytter sig, måles den igen lidt efter.
+  on('session.measure', async ($, e, next) => {
+    if (e.changed.includes('rateLimits')) {
+      const graenser = e.rateLimits.map(g => ({ ...g }))
+      $.clock.after(2_000, () => void kalibrer($, graenser))
+    }
     return next(e)
   })
 

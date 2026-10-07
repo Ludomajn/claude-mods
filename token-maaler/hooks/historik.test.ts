@@ -129,7 +129,7 @@ describe('tekster', () => {
     expect(linjer[1]).toContain('3 opgaver · 2 aktive dage')
     const opgavelinjer = linjer.filter(l => / - opgave \d+$/.test(l))
     expect(opgavelinjer.map(l => / - opgave (\d+)$/.exec(l)?.[1])).toEqual(['1', '3', '2'])
-    expect(opgavelinjer[0]).toMatch(/^█+░* 67% \(\$0\.12\) - Dag 1 - "Byg forsiden" - opgave 1$/)
+    expect(opgavelinjer[0]).toMatch(/^█+░* 0,78 kr - Dag 1 - "Byg forsiden" - opgave 1$/)
     expect(linjer.some(l => /^\s*\d+[.)]\s/.test(l))).toBe(false)
     expect(linjer.some(l => l.includes('den seneste er 3'))).toBe(true)
   })
@@ -142,7 +142,7 @@ describe('tekster', () => {
     const opgave = opgaveTekst(p, 1, true, {}, b)
     expect(opgave[0]).toMatch(/^Opgave 1 · dag 1 · .*: Byggede forsiden \(læste stor\.ts\)$/)
     expect(opgave[1]).toBe('Din besked: "Byg forsiden"')
-    expect(dagTekst(p, 1, false, b).some(l => l.endsWith('(\$0.12) - Byggede forsiden (læste stor.ts) - opgave 1'))).toBe(true)
+    expect(dagTekst(p, 1, false, b).some(l => l.endsWith('0,78 kr - Byggede forsiden (læste stor.ts) - opgave 1'))).toBe(true)
   })
 
   test('modellen får beskeden, det forrige svar, handlingerne og svaret', () => {
@@ -166,7 +166,7 @@ describe('tekster', () => {
     const linjer = projektTekst(projekt([hoved]))
     const sidste = linjer.filter(l => l.startsWith('█') || l.startsWith('░') || l.startsWith('Plus'))
 
-    expect(sidste.at(-1)).toBe('Plus 2 mindre opgaver: $0.060 (4%).')
+    expect(sidste.at(-1)).toBe('Plus 2 mindre opgaver: 0,39 kr, 4% af det hele.')
     const procenter = sidste.slice(0, -1).map(l => Number(/ (\d+)% /.exec(l)?.[1]))
     expect(procenter).toEqual([...procenter].sort((a, b) => b - a))
   })

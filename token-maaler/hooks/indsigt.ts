@@ -1,4 +1,5 @@
 import { afkortOrd, bjaelke } from './analyse'
+import { maalForklaring, maalKr } from './enhed'
 import { beloeb, MEST, raadBlok, restLinje } from './raad'
 import type { Raad } from './raad'
 
@@ -8,6 +9,8 @@ export type Resume = {
   titel: string
   usd: number
   dage: string[]
+  // Forbruget pr. kvarter, til at måle abonnementets grænser.
+  kvarterer?: Record<string, number>
   raad: Pick<Raad, 'id' | 'navn' | 'handling' | 'kort' | 'usd'>[]
 }
 
@@ -48,9 +51,9 @@ export const indsigtTekst = (liste: readonly Resume[], ekstra: readonly Raad[] =
   const dage = new Set(liste.flatMap(s => s.dage)).size
   const ud = [
     '**Indsigt i dit Claude-forbrug**',
-    `${samtaler(liste.length)} · ${dage === 1 ? '1 aktiv dag' : `${dage} aktive dage`} · ${beloeb(sum(liste, s => s.usd))} i alt`,
+    `${samtaler(liste.length)} · ${dage === 1 ? '1 aktiv dag' : `${dage} aktive dage`} · ${maalKr(sum(liste, s => s.usd))} i alt`,
     '',
-    '**Råd på tværs** · beløb = hvad du cirka kunne have sparet',
+    `**Råd på tværs** · tal = ${maalForklaring()}, du cirka kunne have sparet`,
   ]
   const raad = tvaersRaad(liste, ekstra)
   const stoerst = raad[0]?.usd ?? 0

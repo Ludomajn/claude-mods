@@ -1,6 +1,6 @@
 # Token-måler til Claude Code
 
-Viser, hvad projektet, hver opgave og hver dag kostede i tokens og dollars, og hvad der kostede mest.
+Viser, hvor meget af dine grænser (5 timer og ugen) projektet, hver opgave og hver dag brugte, og hvad der brugte mest. Kroner står som ekstra.
 
 - `/tokens` viser hele projektets forbrug: tokens og pris i alt, og opgaverne sorteret efter de dyreste, hver med en kort beskrivelse af, hvad Claude udførte.
 - `/tokens 3` udvider opgave 3: hvad prisen gik til, og hvorfor den blev dyr.
@@ -40,16 +40,19 @@ I Claude-appen kan du også installere den under **+** ved prompten → **Plugin
 Under `/config` står mod'ens indstillinger; alle er slået til fra start:
 
 - **Velkomst i nye samtaler**: "Bliv klogere på dit forbrug og dine prompts" med knapperne Indsigt og Dine prompts.
-- **Bånd efter hver opgave**: prisen på den seneste opgave over prompten.
+- **Bånd efter hver opgave**: hvor meget af grænserne den seneste opgave brugte, over prompten.
+- **Kroner pr. dollar**: kursen, listepriserne omregnes til kroner med (standard 6,5).
 - **Beskeder**: en kort besked efter hver opgave og ved nye råd.
-- **Dine prompts**: knappen Dine prompts ved siden af Indsigt. Gennemgangen sender uddrag af dine samtaler til Opus, Sonnet og Haiku og koster typisk under $1.
+- **Dine prompts**: knappen Dine prompts ved siden af Indsigt. Gennemgangen sender uddrag af dine samtaler til Opus, Sonnet og Haiku og koster typisk under 7 kr.
 - **Beskrivelser af opgaver**: Claude Haiku skriver en kort beskrivelse af hver opgave. Slå den fra, hvis intet fra samtalen må sendes til en beskrivelse.
 
 ## Sådan regnes det
 
 Hvert modelkald melder sine egne tokens. Et værktøjsresultat (fx en fil, der læses) bliver i samtalen og læses igen i alle senere runder, så mod'en tæller det med dér.
 
-Historikken pr. dag kommer fra sessionens transcript-filer i `~/.claude/projects`. En dag er en kalenderdag i din egen tidszone, og dag 1 er den første dag med aktivitet. Priserne er Anthropics listepriser; kald i baggrunden (titler, forslag) står ikke i transcriptet og er ikke med.
+Historikken pr. dag kommer fra sessionens transcript-filer i `~/.claude/projects`. En dag er en kalenderdag i din egen tidszone, og dag 1 er den første dag med aktivitet. Kald i baggrunden (titler, forslag) står ikke i transcriptet og er ikke med.
+
+Hovedtallet er andelen af dine grænser på abonnementet: 5-timersgrænsen og ugens grænse. Claude Code kender kun grænserne som procent, så mod'en måler dem: når en grænse flytter sig, lægger den listeprisen for alle modelkald i grænsens vindue sammen (fra alle dine transcripts) og deler med procenten. Medianen af de seneste ti målinger bruges, så én skæv måling ikke flytter tallene. Forbrug uden for Claude Code (fx claude.ai) tæller med i grænsen, men ikke i transcriptet, så andelene er snarere for høje end for lave. Før den første måling, og uden abonnement, vises kroner. Kroner er Anthropics listepriser omregnet med kursen i `/config`.
 
 ## Analytikerens råd
 
@@ -71,4 +74,4 @@ Alle skøn er regnet ud fra den enkelte brugers egne transcripts, ikke ud fra fa
 
 ### Sådan tilføjer du et råd
 
-Reglerne står i `hooks/raad.ts`. En regel er en funktion, der får projektet og hver opgaves analyse og giver nul eller flere råd tilbage: `navn` (få ord), `hvorfor` (hvad der skete, med tal), `handling` (hvad man gør, og hvorfor det hjælper), `kort` (handlingen i få ord til beskeder), `eksempler` og et skøn i dollars. Skriv funktionen, og sæt den i listen `REGLER`. Beskeder, `/tokens råd`, Indsigt på tværs af samtaler, panelet og Claudes værktøj bruger den så automatisk. Hæv `INDSIGT`-versionen i `hooks/register.tsx`, så gemte resumeer regnes igen.
+Reglerne står i `hooks/raad.ts`. En regel er en funktion, der får projektet og hver opgaves analyse og giver nul eller flere råd tilbage: `navn` (få ord), `hvorfor` (hvad der skete, med tal), `handling` (hvad man gør, og hvorfor det hjælper), `kort` (handlingen i få ord til beskeder), `eksempler` og et skøn i dollars (listepris; mod'en viser det som andel af grænserne eller i kroner). Skriv funktionen, og sæt den i listen `REGLER`. Beskeder, `/tokens råd`, Indsigt på tværs af samtaler, panelet og Claudes værktøj bruger den så automatisk. Hæv `INDSIGT`-versionen i `hooks/register.tsx`, så gemte resumeer regnes igen.

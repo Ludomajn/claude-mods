@@ -119,7 +119,7 @@ describe('analyser', () => {
     const linjer = detaljer(o)
 
     expect(linjer[0]).toBe('Opgave 1: "Opgave"')
-    expect(linjer).toContain('Hvad prisen gik til (ca.):')
+    expect(linjer).toContain('Hvad forbruget gik til (ca.):')
     expect(linjer.some(l => l.startsWith('Hvorfor: '))).toBe(true)
     expect(linjer).toContain('Samtalen ved start: Beskeder 60.0k · Værktøjer 12.0k')
   })

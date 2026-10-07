@@ -44,6 +44,7 @@ const projekt = (usd: number, subUsd = 0, stoppet = { antal: 0, usd: 0 }): Proje
   subUsd,
   graense: stoppet.antal,
   stoppet,
+  kvarterer: {},
 })
 
 // Et modelkald: 100k tokens læst fra cachen og 1.000 skrevet ud.
@@ -84,11 +85,11 @@ describe('analytikerens regler', () => {
     expect(liste.map(r => r.usd)).toEqual([...liste.map(r => r.usd)].sort((a, b) => b - a))
     naer(efter('lang-samtale')?.usd, 4.94 * 0.9 + 3 * 0.8)
     expect(efter('lang-samtale')?.hvorfor).toBe('Samtalen nåede 600k tokens, og hver runde læste den hele igen.')
-    expect(efter('pauser')?.hvorfor).toBe('Cachen udløb 1 gang under pauser, og hele samtalen blev gemt igen for $4.33.')
-    expect(efter('lang-samtale')?.eksempler[0]).toBe('opgave 7: 600k tokens × 41 runder (ca. $4.45 at spare)')
+    expect(efter('pauser')?.hvorfor).toBe('Cachen udløb 1 gang under pauser, og hele samtalen blev gemt igen (28 kr).')
+    expect(efter('lang-samtale')?.eksempler[0]).toBe('opgave 7: 600k tokens × 41 runder (ca. 29 kr at spare)')
     naer(efter('pauser')?.usd, 4.33 * (1 - 60_000 / 541_000))
     naer(efter('store-resultater')?.usd, 0.7)
-    expect(efter('store-resultater')?.eksempler).toEqual(['opgave 7: Read stor.ts (9.0k, $1.00)'])
+    expect(efter('store-resultater')?.eksempler).toEqual(['opgave 7: Read stor.ts (9.0k, 6,50 kr)'])
     naer(efter('rutine')?.usd, 4.71 * 0.8)
     expect(efter('taenkning')).toBeUndefined()
   })
@@ -102,7 +103,7 @@ describe('analytikerens regler', () => {
     const liste = raad(g)
 
     naer(liste.find(r => r.id === 'taenkning')?.usd, 2.6 * 0.4)
-    expect(liste.find(r => r.id === 'subagenter')?.eksempler).toEqual(['opgave 4: Subagent: Find filer ($3.00)'])
+    expect(liste.find(r => r.id === 'subagenter')?.eksempler).toEqual(['opgave 4: Subagent: Find filer (20 kr)'])
   })
 
   test('forbindelser og plugins i konteksten giver et råd med de største', () => {
@@ -154,7 +155,7 @@ describe('analytikerens regler', () => {
     // Billede i: 1.500 tokens skrevet (4 $/M × 1,25) og læst i 40 − i runder (0,20 $/M).
     const billedUsd = Array.from({ length: 40 }, (_, i) => 1_500 * (5e-6 + 0.2e-6 * (40 - i))).reduce((a, b) => a + b, 0)
     naer(efter('skaermbilleder')?.usd, billedUsd * 0.5)
-    expect(efter('skaermbilleder')?.hvorfor).toBe(`Claude tog 40 skærmbilleder, og hvert blev læst igen i resten af opgaven ($${billedUsd.toFixed(2)}).`)
+    expect(efter('skaermbilleder')?.hvorfor).toBe('Claude tog 40 skærmbilleder, og hvert blev læst igen i resten af opgaven (3,55 kr).')
 
     // Hver fejl koster runden efter: 100k × 0,20 $/M + 10k × 20 $/M = $0.22. Den afviste tæller ikke.
     naer(efter('fejl')?.usd, 5 * 0.22 * 0.5)
@@ -178,14 +179,14 @@ describe('analytikerens regler', () => {
 
     // For få kald på high til at måle forskellen, så skønnet er 25 %.
     naer(efter('agent-effort')?.usd, 30 * 10_000 * 20e-6 * 0.25)
-    expect(efter('agent-effort')?.hvorfor).toBe('Subagenter på xhigh eller max kostede $6.60, 97% af subagenternes pris.')
+    expect(efter('agent-effort')?.hvorfor).toBe('Subagenter på xhigh eller max brugte 43 kr, 97% af subagenternes forbrug.')
     expect(efter('agent-effort')?.eksempler).toEqual(['30 af 35 subagent-kald kørte på xhigh eller max'])
     // Rådet om subagenter gælder kun de $20 − $6.60, der ikke kørte på høj effort.
     naer(efter('subagenter')?.usd, Math.max(0, 20 - 30 * (100_000 * 0.2e-6 + 10_000 * 20e-6)) * 0.3)
 
     // Fable 5.1: 100k × 0,25 $/M + 1.000 × 50 $/M = $0.075 pr. kald; Opus 5.5: $0.04.
     naer(efter('dyr-model')?.usd, 20 * (0.075 - 0.04) * 0.5)
-    expect(efter('dyr-model')?.hvorfor).toBe('Fable 5.1 kostede $1.50 i chatten. Samme arbejde på Opus 5.5 havde kostet ca. $0.80.')
+    expect(efter('dyr-model')?.hvorfor).toBe('Fable 5.1 brugte 9,75 kr i chatten. Samme arbejde på Opus 5.5 havde brugt ca. 5,20 kr.')
     expect(efter('dyr-model')?.handling).toBe('Brug Fable 5.1 til de sværeste opgaver og Opus 5.5 til resten. Vælg model, før samtalen starter.')
     expect(efter('dyr-model')?.kort).toBe('Fable 5.1 kun til det sværeste')
 
@@ -211,17 +212,17 @@ describe('analytikerens regler', () => {
 
     expect(linjer).toEqual([
       '**Råd til at bruge færre tokens**',
-      'Test · beløb = hvad du cirka kunne have sparet',
+      'Test · tal = kroner, du cirka kunne have sparet',
       '',
-      '██████████ **$4.45 · Lang samtale**',
+      '██████████ **29 kr · Lang samtale**',
       'Samtalen nåede 600k tokens, og hver runde læste den hele igen.',
       '→ Skriv `/compact`, når en opgave er færdig, så hver runde læser mindre.',
     ])
     expect(raadTekst('Test', raad(g), false).slice(3)).toEqual([
-      '**$4.45 · Lang samtale**',
+      '**29 kr · Lang samtale**',
       'Samtalen nåede 600k tokens, og hver runde læste den hele igen.',
       '→ Skriv `/compact`, når en opgave er færdig, så hver runde læser mindre.',
-      'Fx opgave 7: 600k tokens × 41 runder (ca. $4.45 at spare)',
+      'Fx opgave 7: 600k tokens × 41 runder (ca. 29 kr at spare)',
     ])
     expect(linjer.some(l => /^\s*\d+[.)]\s/.test(l))).toBe(false)
     expect(raadTekst('Test', [])).toEqual(['Ingen råd til Test lige nu.'])
@@ -230,6 +231,6 @@ describe('analytikerens regler', () => {
     const mange = Array.from({ length: 7 }, (_, i): Raad => ({ id: `r${i}`, navn: `Råd ${i}`, hvorfor: 'h', handling: 'g', kort: 'k', usd: 7 - i, eksempler: [] }))
     const tekst = raadTekst('Test', mange)
     expect(tekst.filter(l => l.startsWith('→'))).toHaveLength(5)
-    expect(tekst.at(-1)).toBe('Plus 2 mindre råd for i alt $3.00.')
+    expect(tekst.at(-1)).toBe('Plus 2 mindre råd for i alt 20 kr.')
   })
 })

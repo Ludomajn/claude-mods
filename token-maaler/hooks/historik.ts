@@ -1,6 +1,7 @@
 import type { Opgave } from '../types'
-import { afkort, analyser, bjaelke, bjaelkeLinje, detaljer, dollar, etiket, fmt, pris, procent } from './analyse'
+import { afkort, analyser, bjaelke, detaljer, etiket, fmt, pris, procent } from './analyse'
 import type { Agent, Raadata, Trin } from './analyse'
+import { FODNOTE_MAAL, KVARTER, maal, maalKr } from './enhed'
 
 // Tokens som transcriptet gemmer dem for ét modelkald.
 export type Brug = {
@@ -92,6 +93,8 @@ export type Projekt = {
   // Gange forbrugsgrænsen blev ramt, og de subagenter, der stoppede midt i arbejdet af den grund.
   graense: number
   stoppet: { antal: number; usd: number }
+  // Forbruget pr. kvarter (nøgle: kvarterets nummer siden 1970), til at måle abonnementets grænser.
+  kvarterer: Record<string, number>
 }
 
 const HOVED: Kilde = { id: '', beskrivelse: '', type: '' }
@@ -417,6 +420,11 @@ export const projekt = (samlinger: readonly Samling[]): Projekt => {
   for (const o of opgaver) o.dagNr = dagNr.get(o.dato) ?? 0
 
   const samlet = (f: (d: Dag) => number) => dage.reduce((s, d) => s + f(d), 0)
+  const kvarterer: Record<string, number> = {}
+  for (const k of kald) {
+    const n = String(Math.floor(k.svar.t / KVARTER))
+    kvarterer[n] = (kvarterer[n] ?? 0) + k.usd
+  }
   const stoppede = new Set(samlinger.filter(s => s.kilde.id !== '' && s.stoppet).map(s => s.kilde.id))
   return {
     id: '',
@@ -429,6 +437,7 @@ export const projekt = (samlinger: readonly Samling[]): Projekt => {
     subUsd: samlet(d => d.subUsd),
     graense: samlinger.reduce((n, s) => n + s.graense, 0),
     stoppet: { antal: stoppede.size, usd: kald.filter(k => stoppede.has(k.kilde.id)).reduce((n, k) => n + k.usd, 0) },
+    kvarterer,
   }
 }
 
@@ -449,7 +458,7 @@ const opgaverTekst = (n: number) => (n === 1 ? '1 opgave' : `${n} opgaver`)
 const dageTal = (n: number) => (n === 1 ? '1 aktiv dag' : `${n} aktive dage`)
 
 const linje = (visuel: boolean, andel: number, usd: number, tekst: string) =>
-  visuel ? bjaelkeLinje(andel, usd, tekst) : `${procent(andel)} · ${dollar(usd)} · ${tekst}`
+  `${visuel ? `${bjaelke(andel)} ` : ''}${maalKr(usd)} · ${tekst}`
 
 const navn = (p: Projekt) => p.titel || 'Dette projekt'
 
@@ -460,9 +469,9 @@ const opgaveNavn = (o: { nr: number; tekst: string }, b: Beskrivelser) => b.get(
 
 // Som "16% ($13.39) - Dag 1 - Udførte fase 1 (…) - opgave 5", med bjælken først.
 const opgaveLinje = (visuel: boolean, andel: number, usd: number, dag: number | null, navn: string, nr: number) =>
-  `${visuel ? `${bjaelke(andel)} ` : ''}${procent(andel)} (${dollar(usd)}) - ${dag !== null ? `Dag ${dag} - ` : ''}${navn} - opgave ${nr}`
+  `${visuel ? `${bjaelke(andel)} ` : ''}${maalKr(usd)} - ${dag !== null ? `Dag ${dag} - ` : ''}${navn} - opgave ${nr}`
 
-const plus = (antal: number, usd: number, andel: number, hvad: string) => `Plus ${antal} mindre ${hvad}: ${dollar(usd)} (${procent(andel)}).`
+const plus = (antal: number, usd: number, andel: number, hvad: string) => `Plus ${antal} mindre ${hvad}: ${maalKr(usd)}, ${procent(andel)} af det hele.`
 
 // De opgaver, projektoversigten viser: de 10 dyreste, der kostede noget.
 export const visteOpgaver = (p: Projekt): HistOpgave[] => p.opgaver.filter(o => o.usd > 0).sort((a, b) => b.usd - a.usd).slice(0, 10)
@@ -486,7 +495,7 @@ export const beskrivelsesPrompt = (o: HistOpgave): string =>
     ...(o.svar ? ['', 'Assistentens svar til sidst:', o.svar] : []),
   ].join('\n')
 
-const FODNOTE = 'Beløbene er listepris for samtalens og subagenternes modelkald. Kald i baggrunden, fx titler og forslag, er ikke med.'
+const FODNOTE = FODNOTE_MAAL
 
 export const projektTekst = (p: Projekt, visuel = true, b: Beskrivelser = new Map(), raadLinje = ''): string[] => {
   if (p.kald === 0) return [`${navn(p)}: ingen modelkald i historikken endnu.`]
@@ -494,7 +503,7 @@ export const projektTekst = (p: Projekt, visuel = true, b: Beskrivelser = new Ma
   const resten = sorteret.slice(10)
   const linjer = [
     `${navn(p)} · hele projektet`,
-    `${fmt(p.tokens)} tokens · ${dollar(p.usd)} · ${opgaverTekst(p.opgaver.length)} · ${dageTal(p.dage.length)}`,
+    `${maalKr(p.usd)} · ${opgaverTekst(p.opgaver.length)} · ${dageTal(p.dage.length)} · ${fmt(p.tokens)} tokens`,
   ]
   if (sorteret.length) linjer.push('', 'Dyreste opgaver:')
   for (const o of sorteret.slice(0, 10)) {
@@ -533,7 +542,7 @@ export const dageTekst = (p: Projekt, visuel = true): string[] => {
   const vist = p.dage.slice(-31)
   const linjer = [
     navn(p),
-    `${dageTal(n)} · ${dollar(p.usd)} i alt · ca. ${dollar(p.usd / n)} pr. dag · ${opgaverTekst(p.opgaver.length)} · ${fmt(p.tokens)} tokens`,
+    `${dageTal(n)} · ${maalKr(p.usd)} i alt · ca. ${maal(p.usd / n)} pr. dag · ${opgaverTekst(p.opgaver.length)}`,
     '',
   ]
   if (n > vist.length) linjer.push(`De seneste ${vist.length} af ${n} dage:`)
@@ -544,7 +553,7 @@ export const dageTekst = (p: Projekt, visuel = true): string[] => {
   }
   const dyreste = [...p.dage].sort((a, b) => b.usd - a.usd)[0]
   if (dyreste) {
-    linjer.push('', `Dyreste dag: dag ${dyreste.nr} (${dollar(dyreste.usd)}).${visuel ? ` Skriv /tokens dag ${dyreste.nr} for detaljer.` : ''}`)
+    linjer.push('', `Dyreste dag: dag ${dyreste.nr} (${maal(dyreste.usd)}).${visuel ? ` Skriv /tokens dag ${dyreste.nr} for detaljer.` : ''}`)
   }
   linjer.push(FODNOTE)
   return linjer
@@ -555,7 +564,7 @@ export const dagTekst = (p: Projekt, nr: number, visuel = true, b: Beskrivelser 
   if (!d) return [`Dag ${nr} findes ikke. ${navn(p)} har ${dageTal(p.dage.length)}.`]
   const linjer = [
     `Dag ${d.nr} · ${datoTekst(d.dato)} · ${navn(p)}`,
-    `${dollar(d.usd)} · ${fmt(d.tokens)} tokens · ${opgaverTekst(d.opgaver)} · ${d.kald} modelkald · aktiv ca. ${varighed(d.aktivMin)}`,
+    `${maalKr(d.usd)} · ${opgaverTekst(d.opgaver)} · ${d.kald} modelkald · aktiv ca. ${varighed(d.aktivMin)}`,
   ]
   if (d.subUsd > 0) {
     const hoved = d.usd - d.subUsd

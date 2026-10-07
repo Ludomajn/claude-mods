@@ -1,4 +1,5 @@
 import type { KontekstDel, Opgave, Post, PostType } from '../types'
+import { kr, opgaveMaal } from './enhed'
 
 // Ét modelkald i opgaven, som API'et talte det.
 export type Trin = {
@@ -170,9 +171,9 @@ export const bjaelke = (andel: number, bredde = 20): string => {
   return '█'.repeat(fyldt) + '░'.repeat(bredde - fyldt)
 }
 
-// Bjælke, procent, beløb og tekst på én linje; bjælken først, så den står lige uanset skrifttype.
+// Bjælke, andel, kroner og tekst på én linje; bjælken først, så den står lige uanset skrifttype.
 export const bjaelkeLinje = (andel: number, usd: number | null, tekst: string): string =>
-  `${bjaelke(andel)} ${procent(andel).padStart(4)}  ${usd !== null ? `${dollar(usd).padEnd(7)} ` : ''}${tekst}`
+  `${bjaelke(andel)} ${procent(andel).padStart(4)}  ${usd !== null ? `${kr(usd).padEnd(9)} ` : ''}${tekst}`
 
 const runder = (n: number) => (n === 1 ? '1 runde' : `${n} runder`)
 
@@ -372,9 +373,7 @@ export const kortNavn = (p: Post): string => KORT[p.type] ?? (p.type === 'cache'
 export const opsummering = (o: Opgave): string => {
   const top = o.poster[0]
   return [
-    `${fmt(o.ind + o.ud)} tokens`,
-    o.usd !== null ? dollar(o.usd) : '',
-    runder(o.runder),
+    o.usd !== null ? opgaveMaal(o.usd) : `${fmt(o.ind + o.ud)} tokens`,
     top ? `mest: ${kortNavn(top)} (${procent(top.andel)})` : '',
   ]
     .filter(Boolean)
@@ -401,13 +400,13 @@ const beskriv = (p: Post): string => {
 // uden bjælker er teksten til modellen.
 export const detaljer = (o: Opgave, mere = '', visuel = true, beskrivelse?: string): string[] => {
   const linje = (andel: number, usd: number | null, tekst: string) =>
-    visuel ? bjaelkeLinje(andel, usd, tekst) : `${procent(andel)} · ${usd !== null ? `${dollar(usd)} · ` : ''}${tekst}`
+    visuel ? bjaelkeLinje(andel, usd, tekst) : `${procent(andel)} · ${usd !== null ? `${kr(usd)} · ` : ''}${tekst}`
   const linjer = [
     `Opgave ${o.nr}${mere ? ` · ${mere}` : ''}${o.afbrudt ? ' (afbrudt)' : ''}: ${beskrivelse ?? `"${o.prompt}"`}`,
     ...(beskrivelse ? [`Din besked: "${o.prompt}"`] : []),
     [
+      o.usd !== null ? opgaveMaal(o.usd) : '',
       `${fmt(o.ind + o.ud)} tokens`,
-      o.usd !== null ? dollar(o.usd) : '',
       `${runder(o.runder)} (modelkald)`,
       o.subagenter ? `${o.subagenter} subagent${o.subagenter > 1 ? 'er' : ''}` : '',
       tid(o.sekunder),
@@ -417,14 +416,14 @@ export const detaljer = (o: Opgave, mere = '', visuel = true, beskrivelse?: stri
     '',
     `Hvorfor: ${o.forklaring}`,
   ]
-  if (o.poster.length) linjer.push('', 'Hvad prisen gik til (ca.):')
+  if (o.poster.length) linjer.push('', 'Hvad forbruget gik til (ca.):')
   for (const p of o.poster.slice(0, 5)) linjer.push(linje(p.andel, p.usd, `${p.navn} (${beskriv(p)})`))
   const resten = o.poster.slice(5)
   // Resten står uden bjælke, så bjælkerne altid står i faldende orden.
   if (resten.length) {
     const andel = resten.reduce((s, p) => s + p.andel, 0)
     const usd = o.usd !== null ? resten.reduce((s, p) => s + (p.usd ?? 0), 0) : null
-    linjer.push(`Resten: ${usd !== null ? `${dollar(usd)} ` : ''}(${procent(andel)}).`)
+    linjer.push(`Resten: ${usd !== null ? `${kr(usd)} ` : ''}(${procent(andel)}).`)
   }
   if (o.kontekst.length) {
     linjer.push('', `Samtalen ved start: ${o.kontekst.map(k => `${k.navn} ${fmt(k.tokens)}`).join(' · ')}`)

@@ -1,5 +1,6 @@
 import { afkort, afkortOrd, bjaelke } from './analyse'
 import type { HistOpgave } from './historik'
+import { maalForklaring } from './enhed'
 import { beloeb, MEST } from './raad'
 
 // Dine prompts: hvor en første prompt manglede noget, så brugeren måtte rette bagefter, og hvordan
@@ -126,7 +127,7 @@ export const renPrompt = (svar: string): string =>
     .trim()
 
 export const promptsmartTekst = (liste: readonly PromptRaad[], samtaler: number, visuel = true): string[] => {
-  const ud = ['**Dine prompts**', 'Prompts, der kunne have ramt første gang · beløb = hvad rettelserne bagefter kostede']
+  const ud = ['**Dine prompts**', `Prompts, der kunne have ramt første gang · tal = ${maalForklaring()}, rettelserne bagefter brugte`]
   const vist = [...liste].sort((a, b) => b.usd - a.usd).slice(0, MEST)
   const stoerst = vist[0]?.usd ?? 0
   if (vist.length === 0) ud.push('', 'Ingen prompts at forbedre: de første beskeder ramte, eller det, der fulgte, var nye opgaver.')

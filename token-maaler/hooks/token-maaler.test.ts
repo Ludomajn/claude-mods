@@ -93,7 +93,7 @@ test('en live-målt opgave vises i båndet og som besked', async ($, on) => {
   usd = 1.3
   await $.turn.complete({ answer: 'Færdig.', durationMs: 12_000, isAborted: false, turnId: 't1', reason: 'answer' } as never)
 
-  expect(toasts).toEqual([expect.stringMatching(/^Seneste opgave: .*\$0\.30 · 3 runder · mest: Read big\.ts \(\d+%\) · \/tokens$/)])
+  expect(toasts).toEqual([expect.stringMatching(/^Seneste opgave: 1,95 kr · mest: Read big\.ts \(\d+%\) · \/tokens$/)])
 
   for (const surface of ['terminal', 'desktop'] as const) {
     const baand = await $.ui.mount({ plugin: 'token-maaler', surface, component: 'AbovePrompt', props: baandProps } as never)
@@ -167,18 +167,18 @@ test('/tokens råd alle samler alle samtaler i alle projektmapper og husker resu
   const linjer = tekst.split('\n')
   expect(linjer.slice(0, 8)).toEqual([
     '**Indsigt i dit Claude-forbrug**',
-    expect.stringMatching(/^2 samtaler · 3 aktive dage · \$\d+\.\d+ i alt$/),
+    expect.stringMatching(/^2 samtaler · 3 aktive dage · \d+,\d+ kr i alt$/),
     '',
-    '**Råd på tværs** · beløb = hvad du cirka kunne have sparet',
+    '**Råd på tværs** · tal = kroner, du cirka kunne have sparet',
     '',
-    '██████████ **$0.68 · Lang samtale** · 1 samtale',
-    'I Bæverspil ($0.68).',
+    '██████████ **4,39 kr · Lang samtale** · 1 samtale',
+    'I Bæverspil (4,39 kr).',
     '→ Skriv `/compact`, når en opgave er færdig, så hver runde læser mindre.',
   ])
   expect(linjer.slice(-3)).toEqual([
     '**Dyreste samtaler**',
-    expect.stringMatching(/^██████████ \$\d+\.\d+ · Bæverspil$/),
-    expect.stringMatching(/^█░+ \$\d+\.\d+ · Webshop-agent$/),
+    expect.stringMatching(/^██████████ \d+,\d+ kr · Bæverspil$/),
+    expect.stringMatching(/^█░+ \d+,\d+ kr · Webshop-agent$/),
   ])
   // Bæverspil er uændret, så dens resume hentes fra $.store i stedet for at læse filen igen.
   laaste.add('/h/.claude/projects/-p-y/s2.jsonl')
@@ -186,7 +186,7 @@ test('/tokens råd alle samler alle samtaler i alle projektmapper og husker resu
 
   const vaerktoej = $.tool.call as unknown as (input: Record<string, unknown>) => Promise<{ result?: unknown }>
   const svar = String((await vaerktoej({ tool: 'mcp__token-maaler__historik', alle: true })).result)
-  expect(svar).toContain('**$0.68 · Lang samtale** · 1 samtale\nI Bæverspil ($0.68).')
+  expect(svar).toContain('**4,39 kr · Lang samtale** · 1 samtale\nI Bæverspil (4,39 kr).')
   expect(svar).not.toContain('█')
 
   const baand = await $.ui.mount({ plugin: 'token-maaler', surface: 'desktop', component: 'AbovePrompt', props: baandProps } as never)
@@ -251,7 +251,7 @@ test('historikken: /tokens viser projektet, /tokens <nr> en opgave, og panelet o
   const oversigt = await kommando('')
   expect(oversigt).toContain('Webshop-agent · hele projektet')
   expect(oversigt).toContain('2 opgaver · 2 aktive dage')
-  expect(oversigt.split('\n').find(l => l.endsWith('- opgave 1'))).toMatch(/^█+░* \d+% \(\$0\.080\) - Dag 1 - Byggede forsiden\. - opgave 1$/)
+  expect(oversigt.split('\n').find(l => l.endsWith('- opgave 1'))).toMatch(/^█+░* 0,52 kr - Dag 1 - Byggede forsiden\. - opgave 1$/)
   expect(beskrevet.sort()).toEqual(['forsiden', 'kontaktsiden'])
   await kommando('')
   expect(beskrevet).toHaveLength(2)
@@ -327,7 +327,7 @@ test('analytikeren giver et råd efter en opgave i en lang samtale og gentager d
   }
 
   await enOpgave('t1')
-  expect(raadToasts()).toEqual(['Råd: Lang samtale → /compact efter hver færdig opgave (ca. $0.68 at spare)'])
+  expect(raadToasts()).toEqual(['Råd: Lang samtale → /compact efter hver færdig opgave (ca. 4,39 kr at spare)'])
 
   const baand = await $.ui.mount({ plugin: 'token-maaler', surface: 'desktop', component: 'AbovePrompt', props: baandProps } as never)
   expect((await baand.find({ key: 'raad' }))?.props.label).toBe('Råd (1)')
@@ -366,9 +366,9 @@ test('Dine prompts: Opus finder rettelserne, Sonnet skriver prompten, Haiku fork
   const tekst = (await $.command.run({ command: 'tokens', args: 'promptsmart' } as never)).text ?? ''
   expect(tekst.split('\n')).toEqual([
     '**Dine prompts**',
-    'Prompts, der kunne have ramt første gang · beløb = hvad rettelserne bagefter kostede',
+    'Prompts, der kunne have ramt første gang · tal = kroner, rettelserne bagefter brugte',
     '',
-    '██████████ **$0.040 · Forside med kontakt** · Webshop-agent',
+    '██████████ **0,26 kr · Forside med kontakt** · Webshop-agent',
     'Du skrev: «Byg forsiden» Det manglede: at kontaktsiden hørte med.',
     '→ Prøv: «Byg forsiden og en kontaktside med formular»',
     '',
@@ -414,4 +414,29 @@ test('Dine prompts gemmer intet og siger det, når modellerne ikke svarer', asyn
   )
   svar = true
   expect((await $.command.run({ command: 'prompts', args: '' } as never)).text).toContain('Ingen prompts at forbedre')
+})
+
+test('grænserne måles ud fra forbruget i deres vinduer, og så står tallene som andel af ugen med kroner som ekstra', async ($, on) => {
+  const ur = mock.clock(on)
+  mock.store(on)
+  toMapper(on, new Set())
+  on('session.measure', async (_, e) => ({ changed: e.changed }))
+  // Bæverspillets 10 kald på 2026-10-01 kl. 09 kostede $0.82; Webshop-agentens kald ligger før ugens vindue.
+  await $.session.measure({
+    context: { window: 1_000_000 },
+    rateLimits: [
+      { kind: 'seven_day', percentUsed: 10, resetsAt: '2026-10-05T00:00:00.000Z' },
+      { kind: 'five_hour', percentUsed: 41, resetsAt: '2026-10-01T12:00:00.000Z' },
+    ],
+    changed: ['rateLimits'],
+  } as never)
+  await ur.advance(2_000)
+  const kalibreret = async () => ((await $.command.run({ command: 'tokens', args: 'råd alle' } as never)).text ?? '').includes('af ugen')
+  for (let i = 0; i < 50 && !(await kalibreret()); i++) await vent(10)
+
+  const linjer = ((await $.command.run({ command: 'tokens', args: 'råd alle' } as never)).text ?? '').split('\n')
+  expect(linjer[3]).toBe('**Råd på tværs** · tal = andel af ugens grænse, du cirka kunne have sparet')
+  // $0.675 sparet ÷ $0.082 pr. procentpoint ≈ 8,2 % af ugen.
+  expect(linjer[5]).toBe('██████████ **8,2 % af ugen · Lang samtale** · 1 samtale')
+  expect(linjer[1]).toMatch(/^2 samtaler · 3 aktive dage · \d+ % af ugen \(\d+,\d+ kr\) i alt$/)
 })

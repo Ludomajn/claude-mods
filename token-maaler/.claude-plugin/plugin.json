@@ -1,6 +1,6 @@
 {
   "name": "token-maaler",
-  "version": "0.9.5",
+  "version": "0.10.0",
   "description": "Viser hvad projektet, hver opgave og hver dag kostede i tokens og penge, og giver råd til at bruge færre",
   "types": "./types/index.d.ts",
   "userConfig": {
@@ -33,6 +33,13 @@
       "title": "Dine prompts",
       "description": "Vis knappen Dine prompts ved siden af Indsigt. Når du trykker, analyserer Claude Opus dine dyreste samtaler, Claude Sonnet skriver bedre første prompts, og Claude Haiku skriver forklaringerne. Sender uddrag af samtalerne; prisen står under resultatet.",
       "default": true
+    },
+    "kurs": {
+      "type": "number",
+      "title": "Kroner pr. dollar",
+      "description": "Kursen, listepriserne omregnes til kroner med. Kroner vises som ekstra ved siden af andelen af dine grænser.",
+      "default": 6.5,
+      "min": 0.01
     }
   }
 }
