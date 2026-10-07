@@ -387,12 +387,14 @@ const beskriv = (p: Post): string => {
   }
 }
 
-// `mere` står efter opgavenummeret (fx dag og dato); uden bjælker er teksten til modellen.
-export const detaljer = (o: Opgave, mere = '', visuel = true): string[] => {
+// `mere` står efter opgavenummeret (fx dag og dato), `beskrivelse` siger, hvad Claude udførte;
+// uden bjælker er teksten til modellen.
+export const detaljer = (o: Opgave, mere = '', visuel = true, beskrivelse?: string): string[] => {
   const linje = (andel: number, usd: number | null, tekst: string) =>
     visuel ? bjaelkeLinje(andel, usd, tekst) : `${procent(andel)} · ${usd !== null ? `${dollar(usd)} · ` : ''}${tekst}`
   const linjer = [
-    `Opgave ${o.nr}${mere ? ` · ${mere}` : ''}${o.afbrudt ? ' (afbrudt)' : ''}: "${o.prompt}"`,
+    `Opgave ${o.nr}${mere ? ` · ${mere}` : ''}${o.afbrudt ? ' (afbrudt)' : ''}: ${beskrivelse ?? `"${o.prompt}"`}`,
+    ...(beskrivelse ? [`Din besked: "${o.prompt}"`] : []),
     [
       `${fmt(o.ind + o.ud)} tokens`,
       o.usd !== null ? dollar(o.usd) : '',
@@ -408,10 +410,11 @@ export const detaljer = (o: Opgave, mere = '', visuel = true): string[] => {
   if (o.poster.length) linjer.push('', 'Hvad prisen gik til (ca.):')
   for (const p of o.poster.slice(0, 5)) linjer.push(linje(p.andel, p.usd, `${p.navn} (${beskriv(p)})`))
   const resten = o.poster.slice(5)
+  // Resten står uden bjælke, så bjælkerne altid står i faldende orden.
   if (resten.length) {
     const andel = resten.reduce((s, p) => s + p.andel, 0)
     const usd = o.usd !== null ? resten.reduce((s, p) => s + (p.usd ?? 0), 0) : null
-    linjer.push(linje(andel, usd, 'resten'))
+    linjer.push(`Resten: ${usd !== null ? `${dollar(usd)} ` : ''}(${procent(andel)}).`)
   }
   if (o.kontekst.length) {
     linjer.push('', `Samtalen ved start: ${o.kontekst.map(k => `${k.navn} ${fmt(k.tokens)}`).join(' · ')}`)

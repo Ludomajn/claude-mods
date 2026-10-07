@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { dagTekst, dageTekst, datoNoegle, kaldUsd, laesLinje, nySamling, opgaveTekst, projekt, projektTekst } from './historik'
+import { beskrivelsesPrompt, dagTekst, dageTekst, datoNoegle, kaldUsd, laesLinje, nySamling, opgaveTekst, projekt, projektTekst, renBeskrivelse } from './historik'
 
 const time = (n: number) => ({ ephemeral_5m_input_tokens: 0, ephemeral_1h_input_tokens: n })
 const m1 = { input_tokens: 10, output_tokens: 300, cache_read_input_tokens: 50_000, cache_creation_input_tokens: 1_000, cache_creation: time(1_000) }
@@ -92,11 +92,48 @@ describe('tekster', () => {
 
     expect(linjer[0]).toBe('Testagent · hele projektet')
     expect(linjer[1]).toContain('3 opgaver · 2 aktive dage')
-    const opgavelinjer = linjer.filter(l => /opgave \d+ ·/.test(l))
-    expect(opgavelinjer.map(l => /opgave (\d+)/.exec(l)?.[1])).toEqual(['1', '3', '2'])
-    expect(opgavelinjer[0]?.startsWith('█')).toBe(true)
+    const opgavelinjer = linjer.filter(l => / - opgave \d+$/.test(l))
+    expect(opgavelinjer.map(l => / - opgave (\d+)$/.exec(l)?.[1])).toEqual(['1', '3', '2'])
+    expect(opgavelinjer[0]).toMatch(/^█+░* 67% \(\$0\.12\) - Dag 1 - "Byg forsiden" - opgave 1$/)
     expect(linjer.some(l => /^\s*\d+[.)]\s/.test(l))).toBe(false)
     expect(linjer.some(l => l.includes('den seneste er 3'))).toBe(true)
+  })
+
+  test('med en beskrivelse står det udførte arbejde i stedet for beskeden', () => {
+    const p = testprojekt()
+    const b = new Map([[1, 'Byggede forsiden (læste stor.ts)']])
+
+    expect(projektTekst(p, true, b).some(l => l.endsWith('- Dag 1 - Byggede forsiden (læste stor.ts) - opgave 1'))).toBe(true)
+    const opgave = opgaveTekst(p, 1, true, {}, b)
+    expect(opgave[0]).toMatch(/^Opgave 1 · dag 1 · .*: Byggede forsiden \(læste stor\.ts\)$/)
+    expect(opgave[1]).toBe('Din besked: "Byg forsiden"')
+    expect(dagTekst(p, 1, false, b).some(l => l.endsWith('(\$0.12) - Byggede forsiden (læste stor.ts) - opgave 1'))).toBe(true)
+  })
+
+  test('modellen får beskeden, det forrige svar, handlingerne og svaret', () => {
+    const [o1, o2] = testprojekt().opgaver
+    const forste = o1 ? beskrivelsesPrompt(o1) : ''
+
+    expect(forste).toContain('Brugerens besked:\nByg forsiden')
+    expect(forste).toContain('- Read stor.ts')
+    expect(forste).toContain('Assistentens svar til sidst:\nFærdig')
+    expect(o2 ? beskrivelsesPrompt(o2) : '').toContain('Assistentens forrige svar, som beskeden kan henvise til:\nFærdig')
+    expect(renBeskrivelse('"Byggede forsiden."\nEkstra linje')).toBe('Byggede forsiden.')
+  })
+
+  test('opgaver ud over de 10 dyreste står samlet uden bjælke', () => {
+    const hoved = nySamling()
+    for (let i = 0; i < 12; i++) {
+      const tid = (min: number) => `2026-09-26T${String(8 + Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}:00.000Z`
+      laesLinje(hoved, bruger(tid(i * 5), `Opgave nummer ${i + 1}`))
+      laesLinje(hoved, assistent(`k${i}`, tid(i * 5 + 1), { output_tokens: 1_000 * (i + 1) }))
+    }
+    const linjer = projektTekst(projekt([hoved]))
+    const sidste = linjer.filter(l => l.startsWith('█') || l.startsWith('░') || l.startsWith('Plus'))
+
+    expect(sidste.at(-1)).toBe('Plus 2 mindre opgaver: $0.060 (4%).')
+    const procenter = sidste.slice(0, -1).map(l => Number(/ (\d+)% /.exec(l)?.[1]))
+    expect(procenter).toEqual([...procenter].sort((a, b) => b - a))
   })
 
   test('en opgave forklares ud fra transcriptet', () => {
@@ -119,6 +156,6 @@ describe('tekster', () => {
     const dag2 = dagTekst(p, 2, false)
     expect(dag2.join('\n')).not.toContain('█')
     expect(dag2.some(l => l.includes('subagenter'))).toBe(true)
-    expect(dag2.some(l => l.includes('opgave 3 · "Lav kontaktsiden"'))).toBe(true)
+    expect(dag2.some(l => l.endsWith('- "Lav kontaktsiden" - opgave 3'))).toBe(true)
   })
 })

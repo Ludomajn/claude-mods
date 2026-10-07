@@ -4,8 +4,8 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { KontekstDel } from '../types'
 import { afkort, analyser, etiket, kontekstDele, opsummering } from './analyse'
 import type { Agent, Kald, Trin } from './analyse'
-import { dagTekst, dageTekst, laesLinje, nySamling, opgaveTekst, projekt, projektTekst } from './historik'
-import type { Kilde, Projekt, Samling } from './historik'
+import { beskrivelsesPrompt, dagTekst, dageTekst, laesLinje, nySamling, opgaveTekst, projekt, projektTekst, renBeskrivelse, visteOpgaver } from './historik'
+import type { HistOpgave, Kilde, Projekt, Samling } from './historik'
 
 const opgaver = atom({ plugin: 'token-maaler', key: 'opgaver' } as const, [])
 const skjult = atom({ plugin: 'token-maaler', key: 'skjult' } as const, false)
@@ -166,7 +166,7 @@ const hentProjekt = async ($: EngineInterface, soeg: string): Promise<Projekt | 
     const samlinger = [await samlingFor($, hovedfil, { id: '', beskrivelse: '', type: '' })]
     for (const fil of await jsonlFiler($, `${mappe}/${maal.id}/subagents`)) samlinger.push(await samlingFor($, fil, await kildeFor($, fil)))
     const p = projekt(samlinger)
-    return { ...p, titel: p.titel || maal.titel }
+    return { ...p, id: maal.id, titel: p.titel || maal.titel }
   } catch (fejl) {
     return `Kunne ikke læse historikken: ${fejl instanceof Error ? fejl.message : String(fejl)}`
   }
@@ -180,11 +180,41 @@ const kontekstFor = async ($: EngineInterface, p: Projekt, nr: number): Promise<
   return live.at(-1)?.kontekst ?? []
 }
 
+const BESKRIV_SYSTEM = 'Du skriver korte, konkrete beskrivelser af arbejde, som en AI-assistent har udført. Svar kun med beskrivelsen.'
+
+// Hvad Claude udførte i hver opgave, skrevet af Haiku og gemt mellem sessioner. Nøglen tæller
+// opgavens kald med, så en opgave, der stadig vokser, får en ny beskrivelse næste gang.
+const beskriv = async ($: EngineInterface, p: Projekt, liste: readonly HistOpgave[]): Promise<Map<number, string>> => {
+  const par = await Promise.all(
+    liste.map(async (o): Promise<[number, string] | null> => {
+      const noegle = `beskrivelse:v2:${p.id}:${o.t}:${o.kald}`
+      try {
+        const gemt = await $.store.get(noegle)
+        if (typeof gemt === 'string') return [o.nr, gemt]
+        const svar = await $.model.complete({ model: 'haiku', system: BESKRIV_SYSTEM, prompt: beskrivelsesPrompt(o), maxTokens: 100, timeoutMs: 30_000 })
+        const tekst = svar.isAnswered ? renBeskrivelse(svar.text) : ''
+        if (!tekst) return null
+        await $.store.set(noegle, tekst)
+        return [o.nr, tekst]
+      } catch {
+        return null
+      }
+    }),
+  )
+  return new Map(par.filter((x): x is [number, string] => x !== null))
+}
+
 const tekstFor = async ($: EngineInterface, p: Projekt, visning: Visning | 'dag', nr: number | null, visuel: boolean) => {
-  if (visning === 'opgave' && nr !== null) return opgaveTekst(p, nr, visuel, { kontekst: await kontekstFor($, p, nr) })
-  if (visning === 'dag' && nr !== null) return dagTekst(p, nr, visuel)
+  if (visning === 'opgave' && nr !== null) {
+    const opgave = p.opgaver.filter(o => o.nr === nr)
+    return opgaveTekst(p, nr, visuel, { kontekst: await kontekstFor($, p, nr) }, await beskriv($, p, opgave))
+  }
+  if (visning === 'dag' && nr !== null) {
+    const dyreste = p.dage.find(d => d.nr === nr)?.dyreste ?? []
+    return dagTekst(p, nr, visuel, await beskriv($, p, p.opgaver.filter(o => dyreste.some(x => x.nr === o.nr))))
+  }
   if (visning === 'dage') return dageTekst(p, visuel)
-  return projektTekst(p, visuel)
+  return projektTekst(p, visuel, await beskriv($, p, visteOpgaver(p)))
 }
 
 // Panelet viser samme tekst som kommandoerne; den beregnes, når en knap trykkes.
@@ -296,7 +326,7 @@ export const register: Register = on => {
           ? await tekstFor($, p, 'opgave', opgave, false)
           : dag !== null
             ? await tekstFor($, p, 'dag', dag, false)
-            : [...projektTekst(p, false), '', ...dageTekst(p, false)]
+            : [...(await tekstFor($, p, 'projekt', null, false)), '', ...dageTekst(p, false)]
       return { result: linjer.join('\n') }
     }
     const loop = e.agentId ?? ''

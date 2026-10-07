@@ -2,14 +2,14 @@
 
 Viser, hvad projektet, hver opgave og hver dag kostede i tokens og dollars, og hvad der kostede mest.
 
-- `/tokens` viser hele projektets forbrug: tokens og pris i alt, og opgaverne sorteret efter de dyreste.
+- `/tokens` viser hele projektets forbrug: tokens og pris i alt, og opgaverne sorteret efter de dyreste, hver med en kort beskrivelse af, hvad Claude udførte.
 - `/tokens 3` udvider opgave 3: hvad prisen gik til, og hvorfor den blev dyr.
 - `/tokens dage` viser de aktive dage, og `/tokens dag 2` viser dag 2 med dagens dyreste opgaver.
 - `/tokens Kundekrigen` viser en anden session i samme projektmappe (en del af titlen er nok).
 - Efter hver opgave vises et bånd over prompten med knapperne **Detaljer** og **Projekt**.
 - Du kan også spørge Claude, fx "hvad kostede opgave 4?" eller "hvor mange dage har vi arbejdet på det her?".
 
-Mod'en sender ingen data ud. Den læser kun sessionens egne tal og transcript-filer på din egen maskine.
+Mod'en læser sessionens egne tal og transcript-filer på din egen maskine. For at beskrive opgaverne sender den korte uddrag (din besked, Claudes svar og hvilke filer der blev rørt) til Claude Haiku over samme forbindelse som samtalen; hver beskrivelse gemmes, så det sker én gang pr. opgave og koster under en øre. Ellers sender den intet ud.
 
 ## Installation
 

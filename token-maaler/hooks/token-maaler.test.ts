@@ -147,22 +147,34 @@ test('historikken: /tokens viser projektet, /tokens <nr> en opgave, og panelet o
     return { value: { code: 0, signal: null } }
   })
   on('ui.toast', async () => ({ value: undefined }))
+  mock.store(on)
+  // Haiku beskriver opgaverne; hvert kald tælles, så det kan ses, at beskrivelserne gemmes.
+  const beskrevet: string[] = []
+  on('model.complete', async (_, e) => {
+    const opgave = e.prompt.includes('Lav kontaktsiden') ? 'kontaktsiden' : 'forsiden'
+    beskrevet.push(opgave)
+    return { value: { isAnswered: true, text: `"Byggede ${opgave}."`, usage: {} } as never }
+  })
 
   const kommando = async (args: string) => (await $.command.run({ command: 'tokens', args } as never)).text ?? ''
 
   const oversigt = await kommando('')
   expect(oversigt).toContain('Webshop-agent · hele projektet')
   expect(oversigt).toContain('2 opgaver · 2 aktive dage')
-  expect(oversigt.split('\n').find(l => l.includes('opgave 1 ·'))?.startsWith('█')).toBe(true)
+  expect(oversigt.split('\n').find(l => l.endsWith('- opgave 1'))).toMatch(/^█+░* \d+% \(\$0\.080\) - Dag 1 - Byggede forsiden\. - opgave 1$/)
+  expect(beskrevet.sort()).toEqual(['forsiden', 'kontaktsiden'])
+  await kommando('')
+  expect(beskrevet).toHaveLength(2)
   expect(oversigt.split('\n').some(l => /^\s*\d+[.)]\s/.test(l))).toBe(false)
 
   const opgave1 = await kommando('1')
   expect(opgave1).toContain('Opgave 1 · dag 1 ·')
+  expect(opgave1).toContain(': Byggede forsiden.\nDin besked: "Byg forsiden"')
   expect(opgave1).toContain('Read stor.ts')
   expect(await kommando('9')).toContain('Opgave 9 findes ikke.')
   expect(await kommando('dage')).toContain('2 aktive dage')
   const dag2 = await kommando('dag 2')
-  expect(dag2).toContain('opgave 2 · "Lav kontaktsiden"')
+  expect(dag2).toContain('- Byggede kontaktsiden. - opgave 2')
   expect(dag2).toContain('subagenter')
 
   const vaerktoej = $.tool.call as unknown as (input: Record<string, unknown>) => Promise<{ result?: unknown }>
