@@ -78,25 +78,44 @@ export const kommunikationPrompt = (punkter: readonly { foerste: string; mangled
     'Svar kun med JSON i samme rækkefølge: {"punkter": [{"navn": "…", "manglede": "…"}]}',
   ].join('\n')
 
-// Det første JSON-objekt i et svar; modeller pakker det nogle gange ind i tekst eller ```json.
+// Det første hele JSON-objekt i et svar. Modeller pakker det nogle gange ind i tekst eller ```json og
+// skriver måske en bemærkning med { } bagefter, så objektet findes ved at tælle klammer (uden for
+// strenge) i stedet for at tage alt fra første { til sidste }.
 export const jsonFra = (tekst: string): Record<string, unknown> | null => {
-  const fundet = /\{[\s\S]*\}/.exec(tekst)
-  if (!fundet) return null
-  try {
-    const v: unknown = JSON.parse(fundet[0])
-    return v !== null && typeof v === 'object' ? (v as Record<string, unknown>) : null
-  } catch {
-    return null
+  for (let start = tekst.indexOf('{'); start !== -1; start = tekst.indexOf('{', start + 1)) {
+    let dybde = 0
+    let iStreng = false
+    let escape = false
+    for (let i = start; i < tekst.length; i++) {
+      const c = tekst[i]
+      if (iStreng) {
+        if (escape) escape = false
+        else if (c === '\\') escape = true
+        else if (c === '"') iStreng = false
+      } else if (c === '"') iStreng = true
+      else if (c === '{') dybde++
+      else if (c === '}' && --dybde === 0) {
+        try {
+          const v: unknown = JSON.parse(tekst.slice(start, i + 1))
+          if (v !== null && typeof v === 'object' && !Array.isArray(v)) return v as Record<string, unknown>
+        } catch {
+          // Ikke gyldig JSON herfra; prøv fra næste {.
+        }
+        break
+      }
+    }
   }
+  return null
 }
 
 const tekst = (v: unknown, n: number) => (typeof v === 'string' ? afkort(v, n) : '')
 
-// Opus' kæder, kun med beskeder, der findes, og rettelser, der kom efter den første besked.
-export const kaederFra = (svar: string, opgaver: readonly HistOpgave[]): Kaede[] => {
+// Opus' kæder, kun med beskeder, der findes, og rettelser, der kom efter den første besked. Null, når
+// svaret ikke indeholder en liste af kæder (fx et svar, der blev skåret af): så må intet gemmes.
+export const kaederFra = (svar: string, opgaver: readonly HistOpgave[]): Kaede[] | null => {
   const findes = new Set(opgaver.map(o => o.nr))
   const liste = jsonFra(svar)?.kaeder
-  if (!Array.isArray(liste)) return []
+  if (!Array.isArray(liste)) return null
   return liste.flatMap((x): Kaede[] => {
     const k = (x ?? {}) as Record<string, unknown>
     const start = typeof k.start === 'number' ? k.start : NaN

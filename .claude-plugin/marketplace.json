@@ -8,8 +8,8 @@
     {
       "name": "token-maaler",
       "source": "./token-maaler",
-      "description": "Viser hvad projektet, hver opgave og hver dag kostede i tokens og penge, og giver råd til at bruge færre",
-      "version": "0.13.0"
+      "description": "Viser, hvor meget af dine grænser (5 timer og ugen) dine samtaler bruger, med indsigt på tværs af samtaler, råd til at bruge færre tokens og bedre første prompts",
+      "version": "0.13.1"
     }
   ]
 }

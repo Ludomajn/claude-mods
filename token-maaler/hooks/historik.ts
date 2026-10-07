@@ -1,5 +1,5 @@
 import type { Opgave } from '../types'
-import { afkort, analyser, bjaelke, detaljer, etiket, fmt, pris, procent } from './analyse'
+import { afkort, analyser, bjaelke, detaljer, etiket, fmt, pris, procent, snit } from './analyse'
 import type { Agent, Raadata, Trin } from './analyse'
 import { FODNOTE_MAAL, KVARTER, maal, maalKr } from './enhed'
 
@@ -216,7 +216,7 @@ export const laesLinje = (s: Samling, linje: string): void => {
     for (const b of blokke(besked.content)) {
       if (b.type === 'text' && typeof b.text === 'string') {
         svar.tekstTegn += b.text.length
-        if (svar.tekst.length < TEKST) svar.tekst = `${svar.tekst}${svar.tekst ? '\n' : ''}${b.text}`.slice(0, TEKST)
+        if (svar.tekst.length < TEKST) svar.tekst = snit(`${svar.tekst}${svar.tekst ? '\n' : ''}${b.text}`, TEKST)
       }
       if (b.type !== 'tool_use' || typeof b.name !== 'string') continue
       const vid = typeof b.id === 'string' ? b.id : ''
@@ -243,7 +243,7 @@ export const laesLinje = (s: Samling, linje: string): void => {
     if (resultater.length || m.isMeta) return
     const tekst = brugerTekst(indhold)
     if (tekst.startsWith('[Request interrupted')) s.afbrud.push(t)
-    else if (erOpgave(tekst)) s.beskeder.push({ t, tekst: afkort(tekst, 60), fuld: tekst.slice(0, TEKST) })
+    else if (erOpgave(tekst)) s.beskeder.push({ t, tekst: afkort(tekst, 60), fuld: snit(tekst, TEKST) })
   } else if (linje.includes('"type":"custom-title"')) {
     const m = tolk(linje)
     if (typeof m?.customTitle === 'string') s.titel = m.customTitle
@@ -467,7 +467,7 @@ export type Beskrivelser = ReadonlyMap<number, string>
 
 const opgaveNavn = (o: { nr: number; tekst: string }, b: Beskrivelser) => b.get(o.nr) ?? `"${o.tekst}"`
 
-// Som "16% ($13.39) - Dag 1 - Udførte fase 1 (…) - opgave 5", med bjælken først.
+// Som "2,1 % af ugen (14 kr) - Dag 1 - Udførte fase 1 (…) - opgave 5", med bjælken først.
 const opgaveLinje = (visuel: boolean, andel: number, usd: number, dag: number | null, navn: string, nr: number) =>
   `${visuel ? `${bjaelke(andel)} ` : ''}${maalKr(usd)} - ${dag !== null ? `Dag ${dag} - ` : ''}${navn} - opgave ${nr}`
 
@@ -490,12 +490,10 @@ export const beskrivelsesPrompt = (o: HistOpgave): string =>
     '',
     'Brugerens besked:',
     o.fuld,
-    ...(o.forrigeSvar ? ['', 'Assistentens forrige svar, som beskeden kan henvise til:', o.forrigeSvar.slice(0, 800)] : []),
+    ...(o.forrigeSvar ? ['', 'Assistentens forrige svar, som beskeden kan henvise til:', snit(o.forrigeSvar, 800)] : []),
     ...(o.handlinger.length ? ['', 'Det, assistenten gjorde:', ...o.handlinger.map(h => `- ${h}`)] : []),
     ...(o.svar ? ['', 'Assistentens svar til sidst:', o.svar] : []),
   ].join('\n')
-
-const FODNOTE = FODNOTE_MAAL
 
 export const projektTekst = (p: Projekt, visuel = true, b: Beskrivelser = new Map(), raadLinje = ''): string[] => {
   if (p.kald === 0) return [`${navn(p)}: ingen modelkald i historikken endnu.`]
@@ -518,7 +516,7 @@ export const projektTekst = (p: Projekt, visuel = true, b: Beskrivelser = new Ma
   if (visuel) {
     linjer.push('', `Skriv /tokens <nr> for en opgave${seneste ? ` (den seneste er ${seneste.nr})` : ''} og /tokens dage for dagene.`)
   }
-  linjer.push(FODNOTE)
+  linjer.push(FODNOTE_MAAL)
   return linjer
 }
 
@@ -555,7 +553,7 @@ export const dageTekst = (p: Projekt, visuel = true): string[] => {
   if (dyreste) {
     linjer.push('', `Dyreste dag: dag ${dyreste.nr} (${maal(dyreste.usd)}).${visuel ? ` Skriv /tokens dag ${dyreste.nr} for detaljer.` : ''}`)
   }
-  linjer.push(FODNOTE)
+  linjer.push(FODNOTE_MAAL)
   return linjer
 }
 

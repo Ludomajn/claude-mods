@@ -18,8 +18,6 @@ export const saetEnhed = (e: Partial<Enhed>): void => {
   enhed = { ...enhed, ...e }
 }
 
-export const hentEnhed = (): Enhed => enhed
-
 const komma = (n: number, d: number) => n.toFixed(d).replace('.', ',')
 
 const tusind = (n: number) => String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, '.')

@@ -1,5 +1,5 @@
 import type { KontekstDel, Opgave, Post, PostType } from '../types'
-import { kr, opgaveMaal } from './enhed'
+import { graenseForbrug, kr, opgaveMaal } from './enhed'
 
 // Ét modelkald i opgaven, som API'et talte det.
 export type Trin = {
@@ -72,16 +72,24 @@ const trinUsd = (t: Trin, ttl: number) => {
   return t.input * p.ind + t.cacheSkriv * p.ind * ttl + t.cacheLaes * p.laes + t.output * p.ud
 }
 
+// De første n UTF-16-enheder af en tekst uden at dele et tegn, der fylder to (fx en emoji): en halv
+// emoji gør teksten til ugyldig Unicode, som API'et afviser.
+export const snit = (tekst: string, n: number): string => {
+  const s = tekst.slice(0, Math.max(0, n))
+  const sidste = s.charCodeAt(s.length - 1)
+  return sidste >= 0xd800 && sidste <= 0xdbff ? s.slice(0, -1) : s
+}
+
 export const afkort = (tekst: string, n: number): string => {
   const t = tekst.replace(/\s+/g, ' ').trim()
-  return t.length > n ? `${t.slice(0, n - 1)}…` : t
+  return t.length > n ? `${snit(t, n - 1)}…` : t
 }
 
 // Som afkort, men skærer ved et mellemrum, så intet ord deles.
 export const afkortOrd = (tekst: string, n: number): string => {
   const t = tekst.replace(/\s+/g, ' ').trim()
   if (t.length <= n) return t
-  const del = t.slice(0, n - 1)
+  const del = snit(t, n - 1)
   const ved = del.lastIndexOf(' ')
   return `${(ved > n / 2 ? del.slice(0, ved) : del).replace(/[\s,–-]+$/, '')}…`
 }
@@ -157,8 +165,6 @@ export const fmt = (n: number): string =>
       : n >= 1e3
         ? `${(n / 1e3).toFixed(1)}k`
         : String(Math.round(n))
-
-export const dollar = (usd: number): string => `$${usd >= 0.1 ? usd.toFixed(2) : usd.toFixed(3)}`
 
 export const procent = (andel: number): string => (andel < 0.005 ? '<1%' : `${Math.round(andel * 100)}%`)
 
@@ -361,24 +367,9 @@ export const analyser = (r: Raadata): Opgave => {
   }
 }
 
-const KORT: Partial<Record<PostType, string>> = {
-  start: 'samtalen fra før',
-  besked: 'din besked',
-  taenkning: 'tænkning',
-  tekst: 'tekst til dig',
-}
-
-export const kortNavn = (p: Post): string => KORT[p.type] ?? (p.type === 'cache' ? p.navn.toLowerCase() : afkort(p.navn, 34))
-
-export const opsummering = (o: Opgave): string => {
-  const top = o.poster[0]
-  return [
-    o.usd !== null ? opgaveMaal(o.usd) : `${fmt(o.ind + o.ud)} tokens`,
-    top ? `mest: ${kortNavn(top)} (${procent(top.andel)})` : '',
-  ]
-    .filter(Boolean)
-    .join(' · ')
-}
+// En opgave på få ord, til båndet og beskeden: andelen af 5-timersgrænsen, ellers kroner eller tokens.
+export const opsummering = (o: Pick<Opgave, 'usd' | 'ind' | 'ud'>): string =>
+  o.usd !== null ? graenseForbrug(o.usd) : `${fmt(o.ind + o.ud)} tokens`
 
 const beskriv = (p: Post): string => {
   switch (p.type) {

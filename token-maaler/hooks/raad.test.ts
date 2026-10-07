@@ -163,6 +163,16 @@ describe('analytikerens regler', () => {
     expect(efter('fejl')?.handling).toBe('Skriv de kommandoer og stier, der virker, i CLAUDE.md, så Claude ikke skal prøve sig frem.')
   })
 
+  test('rådet om fejlede kald nævner den hyppigste slags fejl, også når den ikke har sin egen handling', () => {
+    const hoved = Array.from({ length: 41 }, (_, i) => trin('', i, { output: 10_000 }))
+    const fejlede: Kald[] = [
+      ...Array.from({ length: 6 }, (_, i): Kald => ({ loop: '', trin: i, etiket: 'Read mangler.ts', tegn: 100, fejl: 'findes ikke' })),
+      { loop: '', trin: 7, etiket: 'Bash: Kør testene', tegn: 100, fejl: 'kommando' },
+    ]
+    const liste = raad({ projekt: projekt(30), opgaver: [{ o: medRaa(opgave(3, 'Ret filen', 30), hoved, fejlede), a: analyse({}) }], overhead: null })
+    expect(liste.find(r => r.id === 'fejl')?.hvorfor).toBe('7 værktøjskald fejlede, mest filer og stier, der ikke fandtes (6), og hver fejl kostede en ekstra runde.')
+  })
+
   test('subagenter på xhigh, en dyr model i chatten og forbrugsgrænsen giver hver et råd', () => {
     const sub = [
       ...Array.from({ length: 30 }, (_, i) => trin('a1', i, { effort: 'xhigh', output: 10_000 })),

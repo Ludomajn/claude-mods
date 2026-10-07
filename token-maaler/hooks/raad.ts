@@ -13,7 +13,7 @@ export type Raad = {
   hvorfor: string
   // Hvad man gør, og hvorfor det hjælper. Må indeholde `kode`.
   handling: string
-  // Handlingen i få ord, til beskeder og /tokens.
+  // Handlingen i få ord, til /tokens-oversigten.
   kort: string
   usd: number
   // Konkrete steder, det skete; kun til Claude via værktøjet.
@@ -285,19 +285,25 @@ const skaermbilleder: Regel = {
   },
 }
 
-const FEJLHANDLING: Record<string, Pick<Raad, 'handling' | 'kort'> & { navn: string }> = {
+// Hvad hver slags fejl hedder i rådet; slagsen uden egen handling får handlingen for kommandoer.
+const FEJLNAVN: Record<string, string> = {
+  tilladelse: 'manglende tilladelser',
+  timeout: 'timeouts',
+  kommando: 'kommandoer, der fejlede',
+  'findes ikke': 'filer og stier, der ikke fandtes',
+  andet: 'andre fejl',
+}
+
+const FEJLHANDLING: Record<string, Pick<Raad, 'handling' | 'kort'>> = {
   tilladelse: {
-    navn: 'manglende tilladelser',
     handling: 'Giv faste tilladelser til de kommandoer, Claude bruger tit, så de ikke afvises og prøves igen.',
     kort: 'faste tilladelser til faste kommandoer',
   },
   timeout: {
-    navn: 'timeouts',
     handling: 'Bed Claude køre lange kommandoer i baggrunden i stedet for at vente, til de fejler.',
     kort: 'lange kommandoer i baggrunden',
   },
   kommando: {
-    navn: 'kommandoer, der fejlede',
     handling: 'Skriv de kommandoer og stier, der virker, i CLAUDE.md, så Claude ikke skal prøve sig frem.',
     kort: 'faste kommandoer i CLAUDE.md',
   },
@@ -321,15 +327,16 @@ const fejl: Regel = {
     // Omtrent halvdelen kan undgås med faste kommandoer og tilladelser.
     const usd = kostede * 0.5
     if (ramte.length < 5 || usd < MINDST) return []
+    // Den hyppigste slags blandt alle fejlene, også dem uden egen handling.
     const slags = new Map<string, number>()
     for (const x of ramte) slags.set(x.slags, (slags.get(x.slags) ?? 0) + 1)
-    const [top = 'kommando', n = 0] = [...slags.entries()].filter(([k]) => k in FEJLHANDLING).sort((a, b) => b[1] - a[1])[0] ?? []
-    const h = FEJLHANDLING[top] ?? FEJLHANDLING.kommando
+    const [top = 'andet', n = 0] = [...slags.entries()].sort((a, b) => b[1] - a[1])[0] ?? []
+    const h = Object.hasOwn(FEJLHANDLING, top) ? FEJLHANDLING[top] : FEJLHANDLING.kommando
     return [
       {
         id: 'fejl',
         navn: 'Fejlede værktøjskald',
-        hvorfor: `${ramte.length} værktøjskald fejlede, mest ${h?.navn ?? ''} (${n}), og hver fejl kostede en ekstra runde.`,
+        hvorfor: `${ramte.length} værktøjskald fejlede, mest ${Object.hasOwn(FEJLNAVN, top) ? FEJLNAVN[top] : top} (${n}), og hver fejl kostede en ekstra runde.`,
         handling: h?.handling ?? '',
         kort: h?.kort ?? '',
         usd,
@@ -526,7 +533,7 @@ export const beloeb = (usd: number): string => maal(usd)
 // Så mange råd vises; resten samles på én linje.
 export const MEST = 5
 
-// Rådet på én linje, til beskeder og /tokens: "Lang samtale → /compact efter hver færdig opgave".
+// Rådet på én linje, til /tokens-oversigten: "Lang samtale → /compact efter hver færdig opgave".
 export const kortRaad = (r: Pick<Raad, 'navn' | 'kort'>): string => `${r.navn} → ${r.kort}`
 
 // Ét råd på tre linjer: bjælke, beløb og navn; hvad der skete; hvad man gør.

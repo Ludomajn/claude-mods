@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { analyser, detaljer, etiket, pris } from './analyse'
+import { afkort, afkortOrd, analyser, detaljer, etiket, pris, snit } from './analyse'
 import type { Raadata, Trin } from './analyse'
 
 const trin = (index: number, felter: Partial<Trin>): Trin => ({
@@ -141,5 +141,18 @@ describe('etiket og pris', () => {
     expect(Math.abs(pris('claude-sonnet-5-5').laes - 0.2e-6)).toBeLessThan(5e-13)
     expect(Math.abs(pris('claude-fable-5-1').laes - 0.25e-6)).toBeLessThan(5e-13)
     expect(pris('noget-andet')).toEqual(pris('claude-opus-5-5'))
+  })
+})
+
+describe('afkortning', () => {
+  test('en emoji deles aldrig, så teksten forbliver gyldig Unicode', () => {
+    const tekst = `${'x'.repeat(5)}😀 slut`
+    // 😀 fylder to UTF-16-enheder (plads 5 og 6); et snit efter plads 6 ville dele den.
+    expect(snit(tekst, 6)).toBe('xxxxx')
+    expect(snit(tekst, 7)).toBe('xxxxx😀')
+    expect(afkort(tekst, 7)).toBe('xxxxx…')
+    expect(afkortOrd('ord 😀😀😀 mere tekst', 6)).toBe('ord…')
+    const ensom = /[\ud800-\udbff](?![\udc00-\udfff])/
+    for (let n = 1; n < tekst.length; n++) expect(ensom.test(afkort(tekst, n))).toBe(false)
   })
 })

@@ -417,7 +417,7 @@ test('Dine prompts gemmer intet og siger det, når modellerne ikke svarer', asyn
     ({ value: svar ? { isAnswered: true, text: '{"kaeder": []}', usage: {} } : { isAnswered: false, reason: 'api-error', status: 401, error: 'authentication_failed', usage: {} } }) as never,
   )
   expect((await $.command.run({ command: 'prompts', args: '' } as never)).text).toBe(
-    'Kunne ikke gennemgå dine prompts: modellerne svarede ikke (opus: authentication_failed). Prøv igen om lidt.',
+    'Kunne ikke gennemgå dine prompts (opus: authentication_failed). Prøv igen om lidt.',
   )
   svar = true
   expect((await $.command.run({ command: 'prompts', args: '' } as never)).text).toContain('Ingen prompts at forbedre')
@@ -518,4 +518,99 @@ test('Forbrug følger ugens grænse: dagene siden den sidst blev nulstillet', as
   expect(linjer[start]).toMatch(/^\*\*Ugens dyreste samtaler\*\* · siden søn kl\. \d\d:00$/)
   // Webshop-agentens første dag (26. september) ligger før ugen, så kun Bæverspillet og søndagen er med.
   expect(linjer[start + 1]).toMatch(/^I alt \d+,\d+ kr · 2 samtaler$/)
+})
+
+test('Dine prompts gemmer ikke et svar, der ikke kan læses, og læser ikke uændrede samtaler igen', async ($, on) => {
+  mock.clock(on)
+  mock.store(on)
+  const laaste = new Set<string>()
+  toMapper(on, laaste)
+  on('ui.open', async () => ({ value: { isPlaced: true } as never }))
+  let opus = 'Jeg fandt to steder: {"kaeder": [{"start": 1, "rettelser": [2'
+  const kaldt: string[] = []
+  on('model.complete', async (_, e) => {
+    kaldt.push(String(e.model))
+    const svar =
+      e.model === 'opus'
+        ? e.prompt.includes('Byg forsiden')
+          ? opus
+          : '{"kaeder": []}'
+        : e.model === 'sonnet'
+          ? 'Ret *.ts filer og byg kontaktsiden'
+          : '{"punkter": [{"navn": "Ret *.ts filer", "manglede": "kontaktsiden"}]}'
+    return { value: { isAnswered: true, text: svar, usage: {} } as never }
+  })
+  const koer = async () => (await $.command.run({ command: 'prompts', args: '' } as never)).text ?? ''
+
+  // Opus' svar blev skåret af: Webshop-agenten kunne ikke gennemgås, og intet blev gemt for den.
+  expect(await koer()).toContain('1 samtale kunne ikke gennemgås (opus: svaret kunne ikke læses).')
+  opus = '{"kaeder": [{"start": 1, "rettelser": [2], "oenske": "En forside med kontaktside", "manglede": "kontaktsiden"}]} Bemærk: {ingen andre}.'
+  expect(await koer()).toContain('**0,26 kr · Ret *.ts filer** · Webshop-agent')
+
+  // Uændrede filer: hverken modelkald eller læsning af transcripts.
+  const foer = kaldt.length
+  laaste.add('/h/.claude/projects/-p-x/s1.jsonl')
+  laaste.add('/h/.claude/projects/-p-y/s2.jsonl')
+  expect(await koer()).toContain('**0,26 kr · Ret *.ts filer** · Webshop-agent')
+  expect(kaldt).toHaveLength(foer)
+
+  // En enkelt * i et navn ødelægger ikke den fede skrift eller samtalens titel i panelet.
+  const panel = await $.ui.mount({ plugin: 'token-maaler', surface: 'desktop', component: 'Pane', requestId: 'token-maaler', props: panelProps } as never)
+  await panel.press({ key: 'promptsmart' })
+  expect((await panel.find({ type: 'Text', text: /^0,26 kr · Ret \*\.ts filer$/ }))?.props.bold).toBe(true)
+  expect(await panel.find({ type: 'Text', text: /^ · Webshop-agent$/ })).toBeDefined()
+  await panel.unmount()
+})
+
+test('grænsernes målinger læses ind, selv når modulet er indlæst igen uden en ny session.start', async ($, on) => {
+  mock.clock(on, { now: Date.parse('2026-10-03T08:00:00.000Z') })
+  // $0.04 pr. procentpoint af ugen, målt i en tidligere session.
+  mock.store(on, { 'kalibrering:v1': { seven_day: [{ t: 1, usdPrProcent: 0.04 }] } })
+  toMapper(on, new Set())
+  const linjer = ((await $.command.run({ command: 'tokens', args: 'indsigt' } as never)).text ?? '').split('\n')
+  expect(linjer.find(l => l.startsWith('**Gode råd til dig**'))).toBe('**Gode råd til dig** · tal = andel af ugens grænse, du cirka kunne have sparet')
+  // Uden en kendt uge tæller "de seneste 7 dage" hele 7 døgn: Webshop-agentens kald 26. september kl. 09 er med.
+  const start = linjer.indexOf('**Ugens dyreste samtaler** · de seneste 7 dage')
+  expect(linjer.slice(start + 2, start + 4)).toEqual([
+    expect.stringMatching(/^██████████ \d+ % af ugen \(\d+,\d+ kr\) · Bæverspil$/),
+    '█░░░░░░░░░ 3,0 % af ugen (0,78 kr) · Webshop-agent',
+  ])
+})
+
+test('lidt efter start ryddes nøgler fra ældre versioner op, og de nuværende bliver', async ($, on) => {
+  const ur = mock.clock(on)
+  toMapper(on, new Set())
+  const lager = new Map<string, unknown>(
+    Object.entries({
+      'indsigt:v3:a': 1,
+      'promptsmart:v1:a': 1,
+      'raad-vist:a': 1,
+      'beskrivelse:a:1:2': 'gammel',
+      'beskrivelse:v2:a:1:2': 'ny',
+      'promptsmart:v2:a': { raad: [] },
+      'kalibrering:v1': {},
+    }),
+  )
+  on('store.get', async (_, e) => ({ value: lager.get(e.key) }))
+  on('store.set', async (_, e) => {
+    lager.set(e.key, e.value)
+    return { value: undefined }
+  })
+  on('store.delete', async (_, e) => {
+    lager.delete(e.key)
+    return { value: undefined }
+  })
+  on('store.keys', async () => ({ value: [...lager.keys()] }))
+  on('command.register', async () => ({ value: undefined }) as never)
+  on('tool.register', async () => ({ value: undefined }) as never)
+  on('session.start', async (_, e) => ({ cwd: e.cwd }))
+
+  await $.session.start({ cwd: '/p/x', surface: null, isInteractive: false })
+  await ur.advance(20_000)
+  for (let i = 0; i < 100 && lager.has('raad-vist:a'); i++) await vent(10)
+  const noegler = [...lager.keys()]
+  expect(noegler.filter(k => /^(indsigt:v3|promptsmart:v1|raad-vist|beskrivelse:a)/.test(k))).toEqual([])
+  expect(noegler).toEqual(expect.arrayContaining(['beskrivelse:v2:a:1:2', 'promptsmart:v2:a', 'kalibrering:v1']))
+  // Resumeerne for begge samtaler er samlet i den aktuelle version.
+  expect(noegler.filter(k => k.startsWith('indsigt:v4:')).sort()).toEqual(['indsigt:v4:s1', 'indsigt:v4:s2'])
 })

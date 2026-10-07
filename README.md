@@ -1,10 +1,12 @@
 # claude-mods
 
+![Token-måleren i båndet over prompten: sidste opgaves andel af 5-timersgrænsen, knapperne Detaljer, Indsigt og Skjul og målere for 5-timersgrænsen og ugens grænse](token-maaler/docs/baand.png)
+
 Mods til Claude Code.
 
 | Mod | Hvad den gør |
 | --- | --- |
-| [token-maaler](token-maaler) | Viser hvad projektet, hver opgave og hver dag kostede i tokens og penge, og hvad der kostede mest. |
+| [token-maaler](token-maaler) | Viser, hvor meget af dine grænser (5 timer og ugen) dine samtaler bruger, med indsigt på tværs af samtaler, råd til at bruge færre tokens og bedre første prompts. |
 
 ## Installation
 

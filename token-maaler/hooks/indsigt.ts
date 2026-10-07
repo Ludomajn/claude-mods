@@ -47,7 +47,6 @@ export const tvaersRaad = (liste: readonly Resume[], ekstra: readonly Raad[] = [
   ].sort((a, b) => b.usd - a.usd)
 }
 
-// Indsigt i hele forbruget: totalen, rådene på tværs (højst tre linjer hver) og de dyreste samtaler.
 // Alle samtaler: hvor mange, hvor mange aktive dage og forbruget i alt.
 export const alleSamtalerTekst = (liste: readonly Resume[]): string[] => {
   if (liste.length === 0) return ['**Alle samtaler**', 'Ingen samtaler med forbrug endnu.']
@@ -116,20 +115,20 @@ export const ugedage = (resumeer: readonly Pick<Resume, 'kvarterer'>[], nu: numb
   }
   const antal = [0, 0, 0, 0, 0, 0, 0]
   if (Number.isFinite(foerst)) {
-    // Én gang pr. kalenderdag fra den første aktive dag til i dag.
-    for (let dato = datoNoegle(foerst), t = foerst; dato <= datoNoegle(nu); t += 86_400_000, dato = datoNoegle(t)) {
-      const d = (new Date(t).getDay() + 6) % 7
-      antal[d] = (antal[d] ?? 0) + 1
+    // Én gang pr. kalenderdag fra den første aktive dag til i dag. Dagene tælles i kalenderen, ikke
+    // i døgn à 24 timer, så skiftet til og fra sommertid hverken springer en dag over eller tæller
+    // den to gange.
+    const slut = datoNoegle(nu)
+    const f = new Date(foerst)
+    for (let i = 0, d = new Date(f.getFullYear(), f.getMonth(), f.getDate()); datoNoegle(d.getTime()) <= slut && i < 20_000; i++) {
+      const u = (d.getDay() + 6) % 7
+      antal[u] = (antal[u] ?? 0) + 1
+      d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1)
     }
   }
   return UGEDAGE.map((navn, d) => {
     const n = antal[d] ?? 0
     const gns = n > 0 ? (total[d] ?? 0) / n : 0
-    return {
-      etiket: navn.slice(0, 3),
-      vaerdi: gns,
-      tal: gns > 0 ? maal(gns) : '',
-      tooltip: `${navn[0]?.toUpperCase() ?? ''}${navn.slice(1)}: ${gns > 0 ? `${maalKr(gns)} i gennemsnit` : 'intet forbrug'} (${n} ${n === 1 ? navn : `${navn}e`})`,
-    }
+    return { etiket: navn.slice(0, 3), vaerdi: gns, tal: gns > 0 ? maal(gns) : '' }
   })
 }

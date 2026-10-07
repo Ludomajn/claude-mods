@@ -1,14 +1,14 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { ForbrugGrafik, Graense, KontekstDel, Soejle } from '../types'
-import { afkort, analyser, etiket, fmt, kontekstDele } from './analyse'
+import type { ForbrugGrafik, Graense, KontekstDel } from '../types'
+import { afkort, analyser, etiket, kontekstDele, opsummering } from './analyse'
 import type { Agent, Kald, Trin } from './analyse'
 import { beskrivelsesPrompt, dagTekst, dageTekst, datoNoegle, datoTekst, laesLinje, nySamling, opgaveTekst, projekt, projektTekst, renBeskrivelse, visteOpgaver } from './historik'
 import type { HistOpgave, Kilde, Projekt, Samling } from './historik'
 import { alleSamtalerTekst, godeRaadTekst, indsigtTekst, ugedage, ugensSamtalerTekst } from './indsigt'
 import type { Resume } from './indsigt'
-import { graenseForbrug, KVARTER, maal, maalKr, median, minutter, saetEnhed, VINDUER } from './enhed'
+import { KVARTER, median, minutter, saetEnhed, VINDUER } from './enhed'
 import { bjaelkeSvg, brugt, kortNavn, maalerSvgStor, maalerTekst, procentTekst, soejlerSvg, soejlerTekst, vistGraenser } from './grafik'
 import type { Maaling } from './enhed'
 import {
@@ -59,7 +59,7 @@ type Kalibrering = Partial<Record<Vindue, Maaling[]>>
 let indstillinger: Indstillinger = { velkomst: true, baand: true, beskeder: true, beskrivelser: true, promptsmart: true }
 
 const HISTORIK_BESKRIVELSE =
-  "Token usage and cost of this project (this Claude Code session) across its whole history, read from its transcript files: total tokens and cost, every task (each message the user wrote) with its number, day and cost, the active days, and for one task what its cost went to (re-reading the conversation, tool results, thinking, subagents). Use it to answer questions such as 'what did task 7 cost?', 'what did day 2 cost?', 'which tasks were most expensive?' or 'how many days have we worked on this?'. With `alle` it covers all of the user's sessions in all projects instead. Amounts are list prices. Without arguments it returns the project overview and the days."
+  "Token usage and cost of this project (this Claude Code session) across its whole history, read from its transcript files: total tokens and cost, every task (each message the user wrote) with its number, day and cost, the active days, and for one task what its cost went to (re-reading the conversation, tool results, thinking, subagents). Use it to answer questions such as 'what did task 7 cost?', 'what did day 2 cost?', 'which tasks were most expensive?' or 'how many days have we worked on this?'. With `alle` it covers all of the user's sessions in all projects instead. Amounts are shown as a share of the user's weekly subscription limit (estimated from their own usage) with Danish kroner in parentheses, or in kroner at list prices before the limits have been measured. Without arguments it returns the project overview and the days."
 
 type Spand = { trin: Trin[]; kald: Kald[]; agenter: Record<string, Agent> }
 
@@ -73,7 +73,7 @@ type Igang = Spand & {
   kontekst: Promise<KontekstDel[]>
 }
 
-type Visning = 'projekt' | 'opgave' | 'dage' | 'raad' | 'alle' | 'promptsmart' | 'forbrug'
+type Visning = 'projekt' | 'opgave' | 'dage' | 'raad' | 'promptsmart' | 'indsigt'
 
 // Grænserne, som de sidst blev målt, så båndet kan vise dem fra starten af en ny samtale.
 const SIDSTE_GRAENSER = 'graenser:sidst'
@@ -204,7 +204,7 @@ const hentProjekt = async ($: EngineInterface, soeg: string): Promise<Projekt | 
     const egen = await $.session.id()
     const mappe = await projektMappe($, egen)
     if (!mappe) return 'Fandt ikke projektets transcript.'
-    let maal = { id: egen, titel: '' }
+    let valgt = { id: egen, titel: '' }
     if (soeg) {
       const fundne = await findAgenter($, mappe, soeg)
       const [fundet] = fundne
@@ -212,11 +212,11 @@ const hentProjekt = async ($: EngineInterface, soeg: string): Promise<Projekt | 
       if (fundne.length > 1) {
         return [`${fundne.length} sessioner passer på "${soeg}":`, ...fundne.map(f => `  ${f.titel}`), 'Skriv mere af titlen.'].join('\n')
       }
-      maal = fundet
+      valgt = fundet
     }
-    const p = await laesSession($, mappe, maal.id)
+    const p = await laesSession($, mappe, valgt.id)
     if (!p) return 'Ingen historik endnu: projektets transcript er tomt.'
-    return { ...p, titel: p.titel || maal.titel }
+    return { ...p, titel: p.titel || valgt.titel }
   } catch (fejl) {
     return `Kunne ikke læse historikken: ${fejl instanceof Error ? fejl.message : String(fejl)}`
   }
@@ -308,14 +308,17 @@ const titelFra = async ($: EngineInterface, mappe: string, id: string) => {
   }
 }
 
-// En samtales resume: læses kun igen, når en af dens filer har ændret sig.
-const resumeFor = async (
-  $: EngineInterface,
-  s: { mappe: string; id: string; size: number; mtimeMs: number },
-  egen: string,
-): Promise<Resume | null> => {
+type Session = Awaited<ReturnType<typeof alleSessioner>>[number]
+
+// En samtales filer i én streng: antal, samlet størrelse og seneste ændring af hovedfilen og subagenterne.
+const filSignatur = async ($: EngineInterface, s: Session): Promise<string> => {
   const spor = [s, ...(await filSpor($, `${s.mappe}/${s.id}/subagents`))]
-  const signatur = `${spor.length}:${spor.reduce((n, f) => n + f.size, 0)}:${Math.max(...spor.map(f => f.mtimeMs))}`
+  return `${spor.length}:${spor.reduce((n, f) => n + f.size, 0)}:${Math.max(...spor.map(f => f.mtimeMs))}`
+}
+
+// En samtales resume: læses kun igen, når en af dens filer har ændret sig.
+const resumeFor = async ($: EngineInterface, s: Session, egen: string): Promise<Resume | null> => {
+  const signatur = await filSignatur($, s)
   const noegle = `${INDSIGT}${s.id}`
   const gemt = (await $.store.get(noegle)) as { signatur?: unknown; resume?: Resume } | undefined
   if (gemt?.signatur === signatur && gemt.resume) return gemt.resume
@@ -334,22 +337,30 @@ const resumeFor = async (
   return resume
 }
 
-// Indsigt i hele forbruget på tværs af alle samtaler. Forbindelser og plugins kendes kun for
-// denne session, men følger med i alle nye samtaler, så det råd kommer med herfra.
-// Alle samtalers resumeer (dem med forbrug); gamle versioner af resumeerne ryddes op først.
-const samlResumeer = async ($: EngineInterface): Promise<Resume[]> => {
+// Alle samtaler med deres resume; en ulæselig samtale springes over.
+const alleResumeer = async ($: EngineInterface): Promise<{ s: Session; r: Resume }[]> => {
   const egen = await $.session.id()
-  for (const k of await $.store.keys()) if (k.startsWith('indsigt:') && !k.startsWith(INDSIGT)) await $.store.delete(k)
-  const resumeer: Resume[] = []
+  const ud: { s: Session; r: Resume }[] = []
   for (const s of await alleSessioner($)) {
-    try {
-      const r = await resumeFor($, s, egen)
-      if (r && r.usd > 0) resumeer.push(r)
-    } catch {
-      // En ulæselig samtale springes over.
-    }
+    const r = await resumeFor($, s, egen).catch(() => null)
+    if (r) ud.push({ s, r })
   }
-  return resumeer
+  return ud
+}
+
+// Resumeerne for de samtaler, der har kostet noget.
+const samlResumeer = async ($: EngineInterface): Promise<Resume[]> =>
+  (await alleResumeer($)).flatMap(({ r }) => (r.usd > 0 ? [r] : []))
+
+// Nøgler i $.store fra ældre versioner af mod'en, som intet læser længere.
+const FORAELDET = (k: string) =>
+  (k.startsWith('indsigt:') && !k.startsWith(INDSIGT)) ||
+  (k.startsWith('promptsmart:') && !k.startsWith(PROMPTSMART)) ||
+  (k.startsWith('beskrivelse:') && !k.startsWith('beskrivelse:v2:')) ||
+  k.startsWith('raad-vist:')
+
+const rydOp = async ($: EngineInterface) => {
+  for (const k of await $.store.keys()) if (FORAELDET(k)) await $.store.delete(k)
 }
 
 // Forbindelser og plugins kendes kun for denne session, men følger med i alle nye samtaler.
@@ -388,19 +399,33 @@ class ModelFejl extends Error {}
 
 type Fremgang = { samtaler: number; analyseret: number; skrevet: number; klargjort: number }
 
-// Én samtale gennem alle tre modeller. Forslagene gemmes, til samtalen får nye beskeder.
-const promptsmartSamtale = async ($: EngineInterface, p: Projekt, fremgang: Fremgang, vis: () => Promise<void>): Promise<PromptRaad[]> => {
-  const noegle = `${PROMPTSMART}${p.id}`
-  const signatur = `${p.opgaver.length}:${p.opgaver.at(-1)?.t ?? 0}`
-  const gemt = (await $.store.get(noegle)) as { signatur?: unknown; raad?: PromptRaad[] } | undefined
-  if (gemt?.signatur === signatur && Array.isArray(gemt.raad)) {
+type GemtPromptsmart = { signatur?: unknown; fil?: unknown; raad?: PromptRaad[] }
+
+// Én samtale gennem alle tre modeller. Forslagene gemmes, til samtalen får nye beskeder: er filerne
+// uændrede, læses samtalen slet ikke; har den kun fået andet end nye beskeder, genbruges forslagene.
+const promptsmartSamtale = async ($: EngineInterface, s: Session, egen: string, fremgang: Fremgang, vis: () => Promise<void>): Promise<PromptRaad[]> => {
+  const noegle = `${PROMPTSMART}${s.id}`
+  const fil = await filSignatur($, s)
+  const gemt = (await $.store.get(noegle)) as GemtPromptsmart | undefined
+  const genbrug = async (raad: PromptRaad[]) => {
     fremgang.analyseret += 1
     fremgang.klargjort += 1
     await vis()
-    return gemt.raad
+    return raad
+  }
+  if (gemt?.fil === fil && Array.isArray(gemt.raad)) return genbrug(gemt.raad)
+  const laest = await laesSession($, s.mappe, s.id, s.id === egen)
+  if (!laest) return genbrug([])
+  const p = { ...laest, titel: laest.titel || (await titelFra($, s.mappe, s.id)) }
+  const signatur = `${p.opgaver.length}:${p.opgaver.at(-1)?.t ?? 0}`
+  if (gemt?.signatur === signatur && Array.isArray(gemt.raad)) {
+    await $.store.set(noegle, { ...gemt, fil })
+    return genbrug(gemt.raad)
   }
   const titel = p.titel || p.opgaver[0]?.tekst || 'Uden titel'
   const kaeder = kaederFra(await spoerg($, 'analyse', ANALYSE_SYSTEM, analysePrompt(titel, p.opgaver)), p.opgaver)
+  // Et svar uden en læsbar liste (fx skåret af) er en fejl, ikke "intet at forbedre".
+  if (kaeder === null) throw new ModelFejl(`${MODEL.analyse}: svaret kunne ikke læses`)
   fremgang.analyseret += 1
   await vis()
   const fuld = (nr: number) => p.opgaver.find(o => o.nr === nr)?.fuld ?? ''
@@ -434,60 +459,66 @@ const promptsmartSamtale = async ($: EngineInterface, p: Projekt, fremgang: Frem
   fremgang.klargjort += 1
   await vis()
   // Kun en hel gennemgang gemmes; manglede en prompt eller en forklaring, prøves samtalen igen næste gang.
-  if (brugbare.length === kaeder.length && punkter.every(Boolean)) await $.store.set(noegle, { signatur, raad })
+  if (brugbare.length === kaeder.length && punkter.every(Boolean)) await $.store.set(noegle, { signatur, fil, raad })
   return raad
 }
 
 let promptsmartIgang: Promise<string[]> | null = null
+// Alle, der venter på den igangværende gennemgang, og den seneste fremgang, så en, der kommer til
+// undervejs (fx panelet efter /prompts), også ser fremgangen.
+const promptsmartLyttere = new Set<(linjer: string[]) => Promise<void>>()
+let promptsmartFremgang: string[] = []
 
 // Dine prompts på tværs af de dyreste samtaler. `vis` får fremgangen, mens modellerne arbejder.
-const promptsmartFor = (
-  $: EngineInterface,
-  visuel: boolean,
-  vis: (linjer: string[]) => Promise<void> = async () => {},
-): Promise<string[]> => {
+const promptsmartFor = async ($: EngineInterface, visuel: boolean, vis?: (linjer: string[]) => Promise<void>): Promise<string[]> => {
+  if (vis) {
+    promptsmartLyttere.add(vis)
+    if (promptsmartIgang && promptsmartFremgang.length) await vis(promptsmartFremgang)
+  }
   promptsmartIgang ??= (async () => {
     try {
       const egen = await $.session.id()
-      const resumeer: { s: Awaited<ReturnType<typeof alleSessioner>>[number]; usd: number }[] = []
-      for (const s of await alleSessioner($)) {
-        const r = await resumeFor($, s, egen).catch(() => null)
-        if (r && r.usd > 0) resumeer.push({ s, usd: r.usd })
-      }
-      const valgte = resumeer.sort((a, b) => b.usd - a.usd).slice(0, PROMPTSMART_SAMTALER)
+      const valgte = (await alleResumeer($))
+        .filter(({ r }) => r.usd > 0)
+        .sort((a, b) => b.r.usd - a.r.usd)
+        .slice(0, PROMPTSMART_SAMTALER)
       const fremgang: Fremgang = { samtaler: valgte.length, analyseret: 0, skrevet: 0, klargjort: 0 }
-      const visFremgang = () =>
-        vis([
+      const visFremgang = async () => {
+        promptsmartFremgang = [
           '**Dine prompts**',
           `Analyserer: ${fremgang.analyseret} af ${fremgang.samtaler} samtaler`,
           `Forklarer: ${fremgang.skrevet === 1 ? '1 prompt' : `${fremgang.skrevet} prompts`}`,
           `Færdiggør: ${fremgang.klargjort} af ${fremgang.samtaler} samtaler`,
-        ])
+        ]
+        for (const lytter of [...promptsmartLyttere]) await lytter(promptsmartFremgang).catch(() => {})
+      }
       await visFremgang()
       const fejl: string[] = []
       const alle = await Promise.all(
         valgte.map(async ({ s }) => {
           try {
-            const p = await laesSession($, s.mappe, s.id, s.id === egen)
-            if (!p) return []
-            const titel = p.titel || (await titelFra($, s.mappe, s.id))
-            return await promptsmartSamtale($, { ...p, titel }, fremgang, visFremgang)
+            return await promptsmartSamtale($, s, egen, fremgang, visFremgang)
           } catch (f) {
             fejl.push(f instanceof Error ? f.message : String(f))
             return []
           }
         }),
       )
-      if (fejl.length === valgte.length && fejl.length > 0) return [`Kunne ikke gennemgå dine prompts: modellerne svarede ikke (${fejl[0]}). Prøv igen om lidt.`]
+      if (fejl.length === valgte.length && fejl.length > 0) return [`Kunne ikke gennemgå dine prompts (${fejl[0]}). Prøv igen om lidt.`]
       const linjer = promptsmartTekst(alle.flat(), valgte.length - fejl.length, visuel)
       return fejl.length ? [...linjer, `${fejl.length === 1 ? '1 samtale' : `${fejl.length} samtaler`} kunne ikke gennemgås (${fejl[0]}).`] : linjer
     } catch (fejl) {
       return [`Kunne ikke gennemgå dine prompts: ${fejl instanceof Error ? fejl.message : String(fejl)}`]
     } finally {
       promptsmartIgang = null
+      promptsmartFremgang = []
     }
   })()
-  return promptsmartIgang
+  try {
+    return await promptsmartIgang
+  } finally {
+    if (vis) promptsmartLyttere.delete(vis)
+  }
 }
 
 const tekstFor = async ($: EngineInterface, p: Projekt, visning: Visning | 'dag', nr: number | null, visuel: boolean) => {
@@ -515,7 +546,7 @@ const ugen = async ($: EngineInterface, resumeer: readonly Resume[]): Promise<{ 
   const nulstilles = Date.parse(gemte.find(g => g.kind === 'seven_day')?.resetsAt ?? '')
   const start = nulstilles - VINDUER.seven_day.ms
   const iVinduet = !Number.isNaN(nulstilles) && nulstilles > nu && start <= nu
-  const fra = iVinduet ? start : nu - 6 * 86_400_000
+  const fra = iVinduet ? start : nu - VINDUER.seven_day.ms
   const periode = !iVinduet ? 'de seneste 7 dage' : `siden ${datoTekst(datoNoegle(fra)).split(' ')[0] ?? ''} kl. ${klokken(fra)}`
   const fraKvarter = Math.floor(fra / KVARTER)
   const samtaler = resumeer
@@ -568,24 +599,29 @@ const forbrugTekst = async ($: EngineInterface): Promise<string[]> => {
   ]
 }
 
+// Skriver linjerne i panelet, men kun hvis det stadig viser `visning`: har brugeren skiftet visning,
+// mens en langsom beregning kørte, må resultatet ikke overskrive den nye.
+const visHvis = async ($: EngineInterface, visning: Visning, linjer: string[]) => {
+  if ((await read($, paneVisning)) === visning) await update($, paneLinjer, () => linjer)
+}
+
 // Panelet viser samme tekst som kommandoerne; den beregnes, når en knap trykkes.
 const visPanel = async ($: EngineInterface, visning: Visning, nr: number | null) => {
-  // Indsigt: graferne for ugen øverst, så ugens dyreste samtaler og rådene på tværs af alle samtaler.
-  if (visning === 'forbrug' || visning === 'alle') {
-    await update($, paneVisning, () => 'forbrug')
+  // Indsigt: målerne og ugedagene øverst, så alle samtaler, ugens dyreste samtaler og gode råd.
+  if (visning === 'indsigt') {
+    await update($, paneVisning, () => visning)
     // Første gang tager det nogle sekunder at læse alle samtaler; så længe står der, at den henter.
     await update($, paneLinjer, () => [HENTER])
     const { grafik, linjer } = await indsigtVisning($)
+    if ((await read($, paneVisning)) !== visning) return
     await update($, forbrugGrafik, () => grafik)
     await update($, paneLinjer, () => linjer)
     return
   }
   if (visning === 'promptsmart') {
     await update($, paneVisning, () => visning)
-    const linjer = await promptsmartFor($, true, async l => {
-      await update($, paneLinjer, () => l)
-    })
-    await update($, paneLinjer, () => linjer)
+    const linjer = await promptsmartFor($, true, l => visHvis($, visning, l))
+    await visHvis($, visning, linjer)
     return
   }
   const p = await hentProjekt($, '')
@@ -604,7 +640,7 @@ const aabnPanel = async ($: EngineInterface, kommando: string) => {
 
 // Panelet åbnes med det samme og fyldes, når indsigten er samlet.
 const visIndsigt = async ($: EngineInterface) => {
-  const klar = visPanel($, 'forbrug', null)
+  const klar = visPanel($, 'indsigt', null)
   await aabnPanel($, '/tokens indsigt')
   await klar
 }
@@ -615,9 +651,18 @@ const visPromptsmart = async ($: EngineInterface) => {
   await klar
 }
 
+// Om grænsernes målinger er læst ind i dette indlæste modul; en ny indlæsning (fx efter /config)
+// nulstiller dem, og session.start kommer ikke igen.
+let enhedIndlaest = false
+
 const indlaesEnhed = async ($: EngineInterface) => {
   const k = ((await $.store.get(KALIBRERING)) ?? {}) as Kalibrering
   saetEnhed({ uge: median(k.seven_day ?? []), fem: median(k.five_hour ?? []) })
+  enhedIndlaest = true
+}
+
+const sikrEnhed = async ($: EngineInterface) => {
+  if (!enhedIndlaest) await indlaesEnhed($).catch(() => {})
 }
 
 const erVindue = (kind: string): kind is Vindue => kind in VINDUER
@@ -632,12 +677,7 @@ const kalibrer = async ($: EngineInterface, graenser: readonly Graense[]) => {
     const brugbare = graenser.filter(g => erVindue(g.kind) && g.resetsAt !== undefined && g.percentUsed >= VINDUER[g.kind].mindst)
     if (brugbare.length === 0 || nu - sidstKalibreret < 10 * 60_000) return
     sidstKalibreret = nu
-    const egen = await $.session.id()
-    const resumeer: Resume[] = []
-    for (const s of await alleSessioner($)) {
-      const r = await resumeFor($, s, egen).catch(() => null)
-      if (r) resumeer.push(r)
-    }
+    const resumeer = (await alleResumeer($)).map(({ r }) => r)
     const k = ((await $.store.get(KALIBRERING)) ?? {}) as Kalibrering
     for (const g of brugbare) {
       if (!erVindue(g.kind)) continue
@@ -654,10 +694,16 @@ const kalibrer = async ($: EngineInterface, graenser: readonly Graense[]) => {
   }
 }
 
-// Lidt efter sessionens start samles resumeerne, så Indsigt svarer med det samme.
+// Lidt efter sessionens start ryddes gamle nøgler op og samles resumeerne, så Indsigt svarer med
+// det samme. Det kører i baggrunden, så ingen fejl må slippe ud.
 const forvarm = async ($: EngineInterface) => {
-  await indsigtFor($, false)
-  await kalibrer($, (await $.session.usage()).rateLimits)
+  try {
+    await rydOp($)
+    await samlResumeer($)
+    await kalibrer($, (await $.session.usage()).rateLimits)
+  } catch {
+    // Indsigt samler resumeerne selv, når den åbnes.
+  }
 }
 
 export const register: Register = (on, options) => {
@@ -669,6 +715,7 @@ export const register: Register = (on, options) => {
     promptsmart: options.promptsmart !== false,
   }
   saetEnhed({ kurs: typeof options.kurs === 'number' && options.kurs > 0 ? options.kurs : 6.5, uge: null, fem: null })
+  enhedIndlaest = false
   let aktiv: Igang | null = null
   // Subagenter i baggrunden kan blive færdige mellem to opgaver; deres forbrug går til den næste.
   let ventende: Spand = { trin: [], kald: [], agenter: {} }
@@ -778,6 +825,7 @@ export const register: Register = (on, options) => {
   on('tool.call', async ($, e, next) => {
     // Historik-værktøjet, som modellen kan kalde, besvares her.
     if (String(e.tool) === HISTORIK_VAERKTOEJ) {
+      await sikrEnhed($)
       const input = e as unknown as Record<string, unknown>
       if (input.alle === true) return { result: (await indsigtFor($, false)).join('\n') }
       const heltal = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? Math.trunc(v) : null)
@@ -835,7 +883,8 @@ export const register: Register = (on, options) => {
       if (sidste) forrigePrompt = sidste.input + sidste.cacheLaes + sidste.cacheSkriv
       await update($, opgaver, liste => [...liste, opgave].slice(-50))
       if (indstillinger.beskeder) {
-        $.ui.toast(`Opgaven brugte ${opgave.usd !== null ? graenseForbrug(opgave.usd) : `${fmt(opgave.ind + opgave.ud)} tokens`} · ${minutter(opgave.sekunder)}`)
+        await sikrEnhed($)
+        $.ui.toast(`Opgaven brugte ${opsummering(opgave)} · ${minutter(opgave.sekunder)}`)
       }
     } catch {
       // En fejl i analysen må ikke stoppe turen.
@@ -847,6 +896,7 @@ export const register: Register = (on, options) => {
     const ord = e.args.trim().split(/\s+/).filter(Boolean)
     const [foerste = '', ...rest] = ord
     await update($, skjult, () => false)
+    await sikrEnhed($)
     if (foerste === 'forbrug' || foerste === 'indsigt' || ((foerste === 'råd' || foerste === 'raad') && rest.join(' ') === 'alle')) {
       return { text: (await forbrugTekst($)).join('\n') }
     }
@@ -869,10 +919,14 @@ export const register: Register = (on, options) => {
     return { text: typeof p === 'string' ? p : (await tekstFor($, p, visning, nr, true)).join('\n') }
   })
 
-  on('command.run', { command: 'prompts' }, async $ => ({ text: (await promptsmartFor($, true)).join('\n') }))
+  on('command.run', { command: 'prompts' }, async $ => {
+    await sikrEnhed($)
+    return { text: (await promptsmartFor($, true)).join('\n') }
+  })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
+    await sikrEnhed($)
     const sidste = (await read($, opgaver)).at(-1)
     const el = $.ui.resolve(e)
     const { Box, Button, Text } = el
@@ -884,12 +938,15 @@ export const register: Register = (on, options) => {
     const maaler =
       vist.length === 0 ? null : 'Svg' in el && e.surface !== 'terminal' ? (
         <Box alignItems="center" gap={2} marginLeft={1}>
-          {vist.map(x => (
-            <Box key={x.kind} alignItems="center" gap={1}>
-              <Text dimColor>{kortNavn(x)}</Text>
-              <el.Svg {...bjaelkeSvg(brugt(x, nu))} alt={`${kortNavn(x)} ${procentTekst(brugt(x, nu))}`} />
-            </Box>
-          ))}
+          {vist.map(x => {
+            const p = brugt(x, nu)
+            return (
+              <Box key={x.kind} alignItems="center" gap={1}>
+                <Text dimColor>{kortNavn(x)}</Text>
+                <el.Svg {...bjaelkeSvg(p)} alt={`${kortNavn(x)} ${procentTekst(p)}`} />
+              </Box>
+            )
+          })}
         </Box>
       ) : (
         <Text dimColor> {maalerTekst(g, nu)}</Text>
@@ -914,7 +971,7 @@ export const register: Register = (on, options) => {
 
     return (
       <Box alignItems="center" justifyContent="space-between" width="100%">
-        <Text dimColor>Sidste opgave: {sidste.usd !== null ? graenseForbrug(sidste.usd) : `${fmt(sidste.ind + sidste.ud)} tokens`}</Text>
+        <Text dimColor>Sidste opgave: {opsummering(sidste)}</Text>
         <Box alignItems="center" gap={1}>
           <Button
             key="detaljer"
@@ -933,23 +990,26 @@ export const register: Register = (on, options) => {
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
+    await sikrEnhed($)
     const el = $.ui.resolve(e)
     const { Box, Button, Text } = el
     type Stil = { dimColor?: true; color?: string }
-    // **fed** vises fed og `kode` i farve; resten i linjens egen stil.
+    // **fed** vises fed og `kode` i farve; resten i linjens egen stil. split med en fangende gruppe
+    // giver de fundne stykker på de ulige pladser, så en enkelt * i en titel ikke forveksles med fed.
     const dele = (tekst: string, stil: Stil) =>
-      tekst
-        .split(/(\*\*[^*]+\*\*|`[^`]+`)/)
-        .filter(Boolean)
-        .map(d =>
-          d.startsWith('**') ? (
-            <Text bold {...stil}>{d.slice(2, -2)}</Text>
-          ) : d.startsWith('`') ? (
-            <Text color="cyan">{d.slice(1, -1)}</Text>
-          ) : (
-            <Text {...stil}>{d}</Text>
-          ),
-        )
+      tekst.split(/(\*\*.+?\*\*|`[^`]+`)/).flatMap((d, i) =>
+        d === ''
+          ? []
+          : i % 2 === 0
+            ? [<Text {...stil}>{d}</Text>]
+            : d.startsWith('**')
+              ? [
+                  <Text bold {...stil}>
+                    {d.slice(2, -2)}
+                  </Text>,
+                ]
+              : [<Text color="cyan">{d.slice(1, -1)}</Text>],
+      )
     // En bjælke står i farve. Under en overskrift er forklaringen dæmpet, og handlingen (→) er grøn.
     const vis = (linje: string, i: number, alle: readonly string[]) => {
       const [, fyldt = '', tom = '', rest = ''] = /^(█*)(░*)(.*)$/.exec(linje.replace(/\s*\n\s*/g, ' ')) ?? []
@@ -974,7 +1034,7 @@ export const register: Register = (on, options) => {
 
     return (
       <Box flexDirection="column" paddingX={1} paddingY={1}>
-        {visning === 'forbrug' && grafik && (
+        {visning === 'indsigt' && grafik && (
           <Box flexDirection="column" marginBottom={1}>
             <Text bold>Indsigt</Text>
             <Text dimColor>Dine grænser lige nu</Text>
@@ -988,7 +1048,7 @@ export const register: Register = (on, options) => {
             <Box marginTop={1}>
               <Text bold>{UGEDAGE_OVERSKRIFT}</Text>
             </Box>
-            {'Svg' in el && e.surface !== 'terminal' ? (
+            {grafik.dage.length === 0 ? null : 'Svg' in el && e.surface !== 'terminal' ? (
               <el.Svg {...soejlerSvg(grafik.dage)} alt={soejlerTekst(grafik.dage).join('\n')} />
             ) : (
               soejlerTekst(grafik.dage).map(l => <Text>{l}</Text>)
@@ -997,7 +1057,7 @@ export const register: Register = (on, options) => {
         )}
         {(linjer.length ? linjer : ['Tryk Indsigt for at hente forbruget.']).map(vis)}
         <Box marginTop={1} gap={1}>
-          <Button key="indsigt" label="Indsigt" onPress={() => visPanel($, 'forbrug', null)} />
+          <Button key="indsigt" label="Indsigt" onPress={() => visPanel($, 'indsigt', null)} />
           <Button key="dage" label="Dage" onPress={() => visPanel($, 'dage', null)} />
           <Button key="raad" label="Råd" onPress={() => visPanel($, 'raad', null)} />
           {indstillinger.promptsmart && <Button key="promptsmart" label="Dine prompts" onPress={() => visPanel($, 'promptsmart', null)} />}

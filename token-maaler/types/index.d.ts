@@ -46,9 +46,9 @@ export type Opgave = {
 export type Graense = { kind: string; percentUsed: number; resetsAt?: string }
 
 // Én søjle i et søjlediagram.
-export type Soejle = { etiket: string; vaerdi: number; tal: string; tooltip: string }
+export type Soejle = { etiket: string; vaerdi: number; tal: string }
 
-// Det, Forbrug-visningen tegner ud over teksten.
+// Det, Indsigt tegner ud over teksten: det gennemsnitlige forbrug pr. ugedag.
 export type ForbrugGrafik = { dage: Soejle[] }
 
 declare module 'claude-code' {
@@ -57,7 +57,7 @@ declare module 'claude-code' {
       opgaver: Opgave[]
       skjult: boolean
       velkomstSkjult: boolean
-      paneVisning: 'projekt' | 'opgave' | 'dage' | 'raad' | 'alle' | 'promptsmart' | 'forbrug'
+      paneVisning: 'projekt' | 'opgave' | 'dage' | 'raad' | 'promptsmart' | 'indsigt'
       paneNr: number | null
       paneAntal: number
       paneLinjer: string[]

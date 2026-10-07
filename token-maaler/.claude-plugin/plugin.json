@@ -1,7 +1,10 @@
 {
   "name": "token-maaler",
-  "version": "0.13.0",
-  "description": "Viser hvad projektet, hver opgave og hver dag kostede i tokens og penge, og giver råd til at bruge færre",
+  "version": "0.13.1",
+  "description": "Viser, hvor meget af dine grænser (5 timer og ugen) dine samtaler bruger, med indsigt på tværs af samtaler, råd til at bruge færre tokens og bedre første prompts",
+  "author": {
+    "name": "Ludomajn"
+  },
   "types": "./types/index.d.ts",
   "userConfig": {
     "velkomst": {
@@ -13,7 +16,7 @@
     "baand": {
       "type": "boolean",
       "title": "Bånd efter hver opgave",
-      "description": "Vis den seneste opgaves pris over prompten med knapperne Detaljer, Projekt og Råd.",
+      "description": "Vis over prompten, hvor meget af 5-timersgrænsen den seneste opgave brugte, med knapperne Detaljer og Indsigt og målere for dine grænser.",
       "default": true
     },
     "beskeder": {
@@ -31,7 +34,7 @@
     "promptsmart": {
       "type": "boolean",
       "title": "Dine prompts",
-      "description": "Vis knappen Dine prompts ved siden af Indsigt. Når du trykker, analyserer Claude Opus dine dyreste samtaler, Claude Sonnet skriver bedre første prompts, og Claude Haiku skriver forklaringerne. Sender uddrag af samtalerne; prisen står under resultatet.",
+      "description": "Vis knappen Dine prompts ved siden af Indsigt. Når du trykker, analyserer Claude Opus dine dyreste samtaler, Claude Sonnet skriver bedre første prompts, og Claude Haiku skriver forklaringerne. Sender uddrag af samtalerne til modellerne.",
       "default": true
     },
     "kurs": {

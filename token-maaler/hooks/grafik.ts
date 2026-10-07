@@ -60,11 +60,6 @@ const fyld = (p: number) => (p >= 80 ? '#f85149' : p >= 50 ? '#d29922' : CYAN)
 
 const pct = (p: number) => `${Math.round(p)} %`
 
-const graenseTooltip = (g: Graense, nu: number) => {
-  const n = nulstilles(g, nu)
-  return `${NAVN[g.kind]?.lang ?? g.kind}: ${pct(brugt(g, nu))} brugt${n ? `, nulstilles ${n}` : ''}`
-}
-
 // Én lille bjælke til båndet med procenten skrevet på bjælken. Etiketten står som almindelig tekst
 // ved siden af, så den flugter med båndets tekst og knapper.
 export const bjaelkeSvg = (p: number): Tegning => {
@@ -94,11 +89,10 @@ export const maalerSvgStor = (graenser: readonly Graense[], nu: number): Tegning
     const w = Math.max(p > 0 ? 3 : 0, Math.min(100, p) * 2.6)
     const n = nulstilles(g, nu)
     return [
-      `<g><title>${xml(graenseTooltip(g, nu))}</title>`,
       `<text x="0" y="${y + 16}" fill="${TEKST}" font-size="13" ${SKRIFT}>${xml(NAVN[g.kind]?.lang ?? g.kind)}</text>`,
       `<rect x="130" y="${y + 5}" width="260" height="14" rx="7" fill="${SPOR}"/>`,
       `<rect x="130" y="${y + 5}" width="${w.toFixed(1)}" height="14" rx="7" fill="${fyld(p)}"/>`,
-      `<text x="402" y="${y + 16}" fill="${TEKST}" font-size="13" ${SKRIFT}>${xml(`${pct(p)}${n ? ` · nulstilles ${n}` : ''}`)}</text></g>`,
+      `<text x="402" y="${y + 16}" fill="${TEKST}" font-size="13" ${SKRIFT}>${xml(`${pct(p)}${n ? ` · nulstilles ${n}` : ''}`)}</text>`,
     ].join('')
   })
   const h = Math.max(1, vist.length) * 30
@@ -126,11 +120,9 @@ export const soejlerSvg = (soejler: readonly Soejle[]): Tegning => {
     const h = hoej > 0 ? Math.max(s.vaerdi > 0 ? 2 : 0, (s.vaerdi / hoej) * max) : 0
     const y = top + max - h
     return [
-      `<g><title>${xml(s.tooltip)}</title>`,
-      `<rect x="${x + 10}" y="${top}" width="${bred - 20}" height="${max}" fill="transparent"/>`,
       `<rect x="${x + 10}" y="${y.toFixed(1)}" width="${bred - 20}" height="${h.toFixed(1)}" rx="3" fill="${CYAN}"/>`,
       s.vaerdi > 0 ? `<text x="${x + bred / 2}" y="${(y - 5).toFixed(1)}" text-anchor="middle" fill="${TEKST}" font-size="11" ${SKRIFT}>${xml(s.tal)}</text>` : '',
-      `<text x="${x + bred / 2}" y="${top + max + 16}" text-anchor="middle" fill="${TEKST}" font-size="12" ${SKRIFT}>${xml(s.etiket)}</text></g>`,
+      `<text x="${x + bred / 2}" y="${top + max + 16}" text-anchor="middle" fill="${TEKST}" font-size="12" ${SKRIFT}>${xml(s.etiket)}</text>`,
     ].join('')
   })
   const w = soejler.length * bred
