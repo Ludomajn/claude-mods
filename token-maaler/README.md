@@ -58,7 +58,14 @@ Efter hver opgave gennemgår analytikeren hele projektet. Et nyt råd (eller et,
 - Store værktøjsresultater: hele filer og lange output, der læses igen i de følgende runder.
 - Tænkning og subagenter, når de fylder meget af prisen.
 - Rutineopgaver som commit og push i en lang samtale.
+- Subagenter på xhigh eller max effort, når de udgør mindst halvdelen af subagenternes pris. Forskellen til high måles i dine egne data, når der er nok af begge.
+- En dyrere model end standardmodellen (Opus 5.5) i chatten: hvad samme arbejde havde kostet på standardmodellen. En dyrere klasse (fx Fable) får rådet at bruge den til det sværeste; en ældre version (fx Opus 5) får rådet at skifte.
+- Skærmbilleder: hvert billede (ca. 1.500 tokens) læses igen i resten af opgaven; at læse siden som tekst er billigere.
+- Fejlede værktøjskald: hver fejl koster en ekstra runde. Rådet afhænger af den hyppigste slags (kommandoer, tilladelser eller timeouts); kald, du selv afviste, tæller ikke.
+- Forbrugsgrænsen: subagenter, der stoppede midt i arbejdet, fordi grænsen blev nået.
 - Forbindelser og plugins, der følger med i hver runde (kun for den aktive session).
+
+Alle skøn er regnet ud fra den enkelte brugers egne transcripts, ikke ud fra faste antagelser om, hvordan man arbejder. Et kald tæller med sit endelige output, og en forgrenet samtale tæller ikke den kopierede historik med igen.
 
 ### Sådan tilføjer du et råd
 

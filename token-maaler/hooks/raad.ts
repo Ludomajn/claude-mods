@@ -1,5 +1,6 @@
 import type { Opgave, PostType } from '../types'
 import { afkortOrd, bjaelke, dollar, fmt, pris, procent } from './analyse'
+import type { Trin } from './analyse'
 import type { HistOpgave, Projekt } from './historik'
 
 // Ét råd fra analytikeren, vist på højst tre linjer: navn og beløb, hvad den så, og hvad man gør.
@@ -146,7 +147,9 @@ const subagenter: Regel = {
   tjek: g => {
     const kostede = g.projekt.subUsd
     if (kostede < 1 || kostede < 0.2 * g.projekt.usd) return []
-    const usd = kostede * 0.3
+    // Subagenter på xhigh og max har deres eget råd (agent-effort); det her gælder resten.
+    const usd = Math.max(0, kostede - hoejEffort(g)) * 0.3
+    if (usd < MINDST) return []
     const poster = g.opgaver.flatMap(({ o, a }) => a.poster.filter(p => p.type === 'subagent').map(p => ({ o, p })))
     return [
       {
@@ -162,7 +165,7 @@ const subagenter: Regel = {
   },
 }
 
-const RUTINE = /\b(commit|push|deploy|merge|pull request|kør (?:testene|tests))\b/i
+const RUTINE = /\b(commit|push|deploy|merge|pull request|run (?:the )?tests|kør (?:testene|tests))\b/i
 
 const rutine: Regel = {
   id: 'rutine',
@@ -216,7 +219,260 @@ const overhead: Regel = {
   },
 }
 
-export const REGLER: Regel[] = [langSamtale, pauser, storeResultater, taenkning, subagenter, rutine, overhead]
+// Hjælpere til reglerne, der ser på de enkelte modelkald og værktøjskald.
+const alleTrin = (g: Grundlag): Trin[] => g.opgaver.flatMap(({ o }) => o.raa?.trin ?? [])
+
+const hovedTrin = (o: HistOpgave): Trin[] => (o.raa?.trin ?? []).filter(t => t.loop === '').sort((a, b) => a.index - b.index)
+
+const trinUsd = (t: Trin, ttl: number, p = pris(t.model)) => t.input * p.ind + t.cacheSkriv * p.ind * ttl + t.cacheLaes * p.laes + t.output * p.ud
+
+const HOEJ = /^(xhigh|max)$/
+
+// Den model, dyrere modeller sammenlignes med: standardmodellen i Claude Code.
+const STANDARDMODEL = 'claude-opus-5-5'
+
+// "claude-fable-5" → "Fable 5".
+const modelNavn = (model: string) =>
+  model
+    .replace(/^claude-/, '')
+    .replace(/-\d{8}$/, '')
+    .split('-')
+    .map((d, i) => (i === 0 ? d.charAt(0).toUpperCase() + d.slice(1) : d))
+    .join(' ')
+    .replace(/(\d) (\d)/, '$1.$2')
+
+// Et billede i et værktøjsresultat fylder omtrent 1.500 tokens.
+const BILLEDE = 1_500
+
+const skaermbilleder: Regel = {
+  id: 'skaermbilleder',
+  tjek: g => {
+    // Hvert billede skrives til cachen og læses igen i resten af opgavens runder.
+    const ramte = g.opgaver.flatMap(({ o }) => {
+      const h = hovedTrin(o)
+      return (o.raa?.kald ?? [])
+        .filter(k => (k.billeder ?? 0) > 0 && !k.etiket.startsWith('Read '))
+        .map(k => {
+          const p = pris(h[k.trin]?.model ?? '')
+          const tokens = (k.billeder ?? 0) * BILLEDE
+          return { o, antal: k.billeder ?? 0, usd: tokens * (p.ind * o.raa.ttl + p.laes * Math.max(0, h.length - k.trin - 1)) }
+        })
+    })
+    const antal = sum(ramte, x => x.antal)
+    const kostede = sum(ramte, x => x.usd)
+    // Siden læst som tekst fylder typisk under halvdelen af et skærmbillede og kan søges i.
+    const usd = kostede * 0.5
+    if (antal < 10 || usd < MINDST) return []
+    const pr = new Map<number, { o: HistOpgave; antal: number; usd: number }>()
+    for (const x of ramte) {
+      const y = pr.get(x.o.nr) ?? { o: x.o, antal: 0, usd: 0 }
+      y.antal += x.antal
+      y.usd += x.usd
+      pr.set(x.o.nr, y)
+    }
+    return [
+      {
+        id: 'skaermbilleder',
+        navn: 'Skærmbilleder',
+        hvorfor: `Claude tog ${antal} skærmbilleder, og hvert blev læst igen i resten af opgaven (${dollar(kostede)}).`,
+        handling: 'Bed Claude læse siden som tekst og kun tage skærmbilleder, når udseendet skal tjekkes.',
+        kort: 'læs siden som tekst, ikke som billede',
+        usd,
+        eksempler: flest([...pr.values()], x => x.usd).map(x => `opgave ${x.o.nr}: ${x.antal} billeder (${dollar(x.usd)})`),
+      },
+    ]
+  },
+}
+
+const FEJLHANDLING: Record<string, Pick<Raad, 'handling' | 'kort'> & { navn: string }> = {
+  tilladelse: {
+    navn: 'manglende tilladelser',
+    handling: 'Giv faste tilladelser til de kommandoer, Claude bruger tit, så de ikke afvises og prøves igen.',
+    kort: 'faste tilladelser til faste kommandoer',
+  },
+  timeout: {
+    navn: 'timeouts',
+    handling: 'Bed Claude køre lange kommandoer i baggrunden i stedet for at vente, til de fejler.',
+    kort: 'lange kommandoer i baggrunden',
+  },
+  kommando: {
+    navn: 'kommandoer, der fejlede',
+    handling: 'Skriv de kommandoer og stier, der virker, i CLAUDE.md, så Claude ikke skal prøve sig frem.',
+    kort: 'faste kommandoer i CLAUDE.md',
+  },
+}
+
+const fejl: Regel = {
+  id: 'fejl',
+  tjek: g => {
+    // Hvert fejlet kald koster mindst én ekstra runde: Claude læser fejlen og prøver igen.
+    // Kald, du selv afviste, tæller ikke.
+    const ramte = g.opgaver.flatMap(({ o }) => {
+      const h = hovedTrin(o)
+      return (o.raa?.kald ?? [])
+        .filter(k => k.fejl !== undefined && k.fejl !== 'afvist')
+        .map(k => {
+          const naeste = h[k.trin + 1]
+          return { o, slags: k.fejl ?? 'andet', etiket: k.etiket, usd: naeste ? trinUsd(naeste, o.raa.ttl) : 0 }
+        })
+    })
+    const kostede = sum(ramte, x => x.usd)
+    // Omtrent halvdelen kan undgås med faste kommandoer og tilladelser.
+    const usd = kostede * 0.5
+    if (ramte.length < 5 || usd < MINDST) return []
+    const slags = new Map<string, number>()
+    for (const x of ramte) slags.set(x.slags, (slags.get(x.slags) ?? 0) + 1)
+    const [top = 'kommando', n = 0] = [...slags.entries()].filter(([k]) => k in FEJLHANDLING).sort((a, b) => b[1] - a[1])[0] ?? []
+    const h = FEJLHANDLING[top] ?? FEJLHANDLING.kommando
+    return [
+      {
+        id: 'fejl',
+        navn: 'Fejlede værktøjskald',
+        hvorfor: `${ramte.length} værktøjskald fejlede, mest ${h?.navn ?? ''} (${n}), og hver fejl kostede en ekstra runde.`,
+        handling: h?.handling ?? '',
+        kort: h?.kort ?? '',
+        usd,
+        eksempler: flest(ramte, x => x.usd).map(x => `opgave ${x.o.nr}: ${x.etiket} (${x.slags}, ${dollar(x.usd)})`),
+      },
+    ]
+  },
+}
+
+// Subagenternes kald på xhigh og max, når de er mindst $1 og halvdelen af subagenternes pris; ellers 0.
+const hoejEffort = (g: Grundlag): number => {
+  const sub = alleTrin(g).filter(t => t.loop !== '')
+  const kostede = sum(sub.filter(t => HOEJ.test(t.effort ?? '')), t => trinUsd(t, 1.25))
+  return kostede >= 1 && kostede >= 0.5 * sum(sub, t => trinUsd(t, 1.25)) ? kostede : 0
+}
+
+const agentEffort: Regel = {
+  id: 'agent-effort',
+  tjek: g => {
+    const sub = alleTrin(g).filter(t => t.loop !== '')
+    const hoeje = sub.filter(t => HOEJ.test(t.effort ?? ''))
+    const kostede = hoejEffort(g)
+    if (kostede === 0) return []
+    // Hvor meget mindre output et kald på high giver: målt i brugerens egne subagenter, når der er nok
+    // af begge slags, ellers et forsigtigt skøn på 25 %.
+    const high = sub.filter(t => t.effort === 'high')
+    const snit = (l: readonly Trin[]) => sum(l, t => t.output) / l.length
+    const maalt = high.length >= 20 && hoeje.length >= 20 ? 1 - snit(high) / snit(hoeje) : null
+    const faktor = Math.min(0.4, Math.max(0, maalt ?? 0.25))
+    const usd = sum(hoeje, t => t.output * pris(t.model).ud) * faktor
+    if (usd < MINDST) return []
+    return [
+      {
+        id: 'agent-effort',
+        navn: 'Subagenter på høj effort',
+        hvorfor: `Subagenter på xhigh eller max kostede ${dollar(kostede)}, ${procent(kostede / sum(sub, t => trinUsd(t, 1.25)))} af subagenternes pris.`,
+        handling: 'Kør subagenter på high, og spar xhigh til den sværeste del, fx den sidste vurdering. Skriv det i CLAUDE.md.',
+        kort: 'subagenter på high',
+        usd,
+        eksempler: [`${hoeje.length} af ${sub.length} subagent-kald kørte på xhigh eller max`],
+      },
+    ]
+  },
+}
+
+// Modellens familie uden version, fx "opus" eller "fable".
+const familie = (model: string) => model.replace(/^claude-/, '').split('-')[0] ?? ''
+
+// Kald i chatten på en model, der er dyrere end standardmodellen; `samme` vælger en ældre version
+// af standardmodellens familie (fx Opus 5 over for Opus 5.5) eller en anden, dyrere familie (fx Fable).
+const dyreKald = (g: Grundlag, samme: boolean) => {
+  const STANDARD = pris(STANDARDMODEL)
+  const dyre = g.opgaver.flatMap(({ o }) =>
+    hovedTrin(o)
+      .filter(t => pris(t.model).ud > STANDARD.ud && (familie(t.model) === familie(STANDARDMODEL)) === samme)
+      .map(t => ({ o, t, usd: trinUsd(t, o.raa.ttl) })),
+  )
+  const pr = new Map<number, { o: HistOpgave; usd: number }>()
+  for (const x of dyre) pr.set(x.o.nr, { o: x.o, usd: (pr.get(x.o.nr)?.usd ?? 0) + x.usd })
+  return {
+    kostede: sum(dyre, x => x.usd),
+    alternativ: sum(dyre, x => trinUsd(x.t, x.o.raa.ttl, STANDARD)),
+    model: modelNavn(flest(dyre, x => x.usd, 1)[0]?.t.model ?? ''),
+    eksempler: flest([...pr.values()], x => x.usd).map(x => `opgave ${x.o.nr}: "${x.o.tekst}" (${dollar(x.usd)})`),
+  }
+}
+
+const dyrModel: Regel = {
+  id: 'dyr-model',
+  tjek: g => {
+    const { kostede, alternativ, model, eksempler } = dyreKald(g, false)
+    // Antag, at halvdelen af arbejdet var rutine, som standardmodellen klarer lige så godt.
+    const usd = (kostede - alternativ) * 0.5
+    if (usd < MINDST) return []
+    const standard = modelNavn(STANDARDMODEL)
+    return [
+      {
+        id: 'dyr-model',
+        navn: 'Dyr model til rutine',
+        hvorfor: `${model} kostede ${dollar(kostede)} i chatten. Samme arbejde på ${standard} havde kostet ca. ${dollar(alternativ)}.`,
+        handling: `Brug ${model} til de sværeste opgaver og ${standard} til resten. Vælg model, før samtalen starter.`,
+        kort: `${model} kun til det sværeste`,
+        usd,
+        eksempler,
+      },
+    ]
+  },
+}
+
+const gammelModel: Regel = {
+  id: 'gammel-model',
+  tjek: g => {
+    const { kostede, alternativ, model, eksempler } = dyreKald(g, true)
+    const usd = kostede - alternativ
+    if (usd < MINDST) return []
+    const standard = modelNavn(STANDARDMODEL)
+    return [
+      {
+        id: 'gammel-model',
+        navn: 'Ældre model',
+        hvorfor: `${model} kostede ${dollar(kostede)} i chatten. ${standard} er nyere og havde kostet ca. ${dollar(alternativ)}.`,
+        handling: `Skift til ${standard} i modelvælgeren; den er nyere og billigere pr. token.`,
+        kort: `skift til ${standard}`,
+        usd,
+        eksempler,
+      },
+    ]
+  },
+}
+
+const forbrugsgraense: Regel = {
+  id: 'forbrugsgraense',
+  tjek: g => {
+    const { antal, usd } = g.projekt.stoppet ?? { antal: 0, usd: 0 }
+    if (antal === 0 || usd < MINDST) return []
+    return [
+      {
+        id: 'forbrugsgraense',
+        navn: 'Forbrugsgrænse',
+        hvorfor: `Grænsen stoppede ${antal === 1 ? '1 subagent' : `${antal} subagenter`} midt i arbejdet, og det, de nåede, gik tabt.`,
+        handling: 'Tjek `/usage` før store workflows, og start dem først, når der er plads til hele kørslen.',
+        kort: 'tjek /usage før store kørsler',
+        usd,
+        eksempler: [`forbrugsgrænsen afviste ${g.projekt.graense} kald`],
+      },
+    ]
+  },
+}
+
+export const REGLER: Regel[] = [
+  langSamtale,
+  pauser,
+  storeResultater,
+  taenkning,
+  subagenter,
+  agentEffort,
+  rutine,
+  dyrModel,
+  gammelModel,
+  skaermbilleder,
+  fejl,
+  forbrugsgraense,
+  overhead,
+]
 
 export const raad = (g: Grundlag, regler: readonly Regel[] = REGLER): Raad[] =>
   regler

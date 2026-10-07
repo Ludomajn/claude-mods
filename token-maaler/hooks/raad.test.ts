@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'claude-code/testing'
 
 import type { Opgave, Post } from '../types'
+import type { Kald, Raadata, Trin } from './analyse'
 import type { HistOpgave, Projekt } from './historik'
 import { overheadFra, raad, raadTekst } from './raad'
 import type { Grundlag, Raad } from './raad'
@@ -32,7 +33,34 @@ const analyse = (felter: Partial<Opgave>): Opgave => ({
 const opgave = (nr: number, fuld: string, usd: number): HistOpgave =>
   ({ nr, t: 0, dato: '2026-10-07', dagNr: 1, tekst: fuld, fuld, usd, tokens: 0, kald: 1, handlinger: [], svar: '', forrigeSvar: '', raa: {} }) as unknown as HistOpgave
 
-const projekt = (usd: number, subUsd = 0): Projekt => ({ id: 's1', titel: 'Test', dage: [], opgaver: [], usd, tokens: 0, kald: 1, subUsd })
+const projekt = (usd: number, subUsd = 0, stoppet = { antal: 0, usd: 0 }): Projekt => ({
+  id: 's1',
+  titel: 'Test',
+  dage: [],
+  opgaver: [],
+  usd,
+  tokens: 0,
+  kald: 1,
+  subUsd,
+  graense: stoppet.antal,
+  stoppet,
+})
+
+// Et modelkald: 100k tokens læst fra cachen og 1.000 skrevet ud.
+const trin = (loop: string, index: number, felter: Partial<Trin> = {}): Trin => ({
+  loop,
+  index,
+  model: 'claude-opus-5-5',
+  input: 0,
+  output: 1_000,
+  cacheLaes: 100_000,
+  cacheSkriv: 0,
+  svarTegn: 0,
+  vaerktoejsInput: [],
+  ...felter,
+})
+
+const medRaa = (o: HistOpgave, trinListe: Trin[], kald: Kald[] = []): HistOpgave => ({ ...o, raa: { ttl: 1.25, trin: trinListe, kald } as unknown as Raadata })
 
 const naer = (faktisk: number | undefined, forventet: number) => expect(Math.abs((faktisk ?? NaN) - forventet)).toBeLessThan(1e-6)
 
@@ -109,6 +137,68 @@ describe('analytikerens regler', () => {
     expect(r?.eksempler[0]).toBe('forbindelsen med data_cms_tool (MCP): 12.0k tokens')
     expect(r?.kort).toBe('slå ubrugte fra, fx forbindelsen med data_cms_tool')
     expect(r?.hvorfor).toBe('24.0k tokens følger med i hver runde, mest forbindelsen med data_cms_tool (12.0k).')
+  })
+
+  test('skærmbilleder og fejlede værktøjskald koster runder, der kunne have været sparet', () => {
+    const hoved = Array.from({ length: 41 }, (_, i) => trin('', i, { output: 10_000 }))
+    const billeder: Kald[] = Array.from({ length: 40 }, (_, i) => ({ loop: '', trin: i, etiket: 'Claude_Browser: computer', tegn: 5_000, billeder: 1 }))
+    const fejlede: Kald[] = [
+      ...Array.from({ length: 4 }, (_, i): Kald => ({ loop: '', trin: i, etiket: 'Bash: Kør testene', tegn: 100, fejl: 'kommando' })),
+      { loop: '', trin: 5, etiket: 'Bash: Slet mappen', tegn: 100, fejl: 'tilladelse' },
+      { loop: '', trin: 6, etiket: 'Bash: Push', tegn: 100, fejl: 'afvist' },
+    ]
+    const g: Grundlag = { projekt: projekt(30), opgaver: [{ o: medRaa(opgave(3, 'Test siden', 30), hoved, [...billeder, ...fejlede]), a: analyse({}) }], overhead: null }
+    const liste = raad(g)
+    const efter = (id: string) => liste.find(r => r.id === id)
+
+    // Billede i: 1.500 tokens skrevet (4 $/M × 1,25) og læst i 40 − i runder (0,20 $/M).
+    const billedUsd = Array.from({ length: 40 }, (_, i) => 1_500 * (5e-6 + 0.2e-6 * (40 - i))).reduce((a, b) => a + b, 0)
+    naer(efter('skaermbilleder')?.usd, billedUsd * 0.5)
+    expect(efter('skaermbilleder')?.hvorfor).toBe(`Claude tog 40 skærmbilleder, og hvert blev læst igen i resten af opgaven ($${billedUsd.toFixed(2)}).`)
+
+    // Hver fejl koster runden efter: 100k × 0,20 $/M + 10k × 20 $/M = $0.22. Den afviste tæller ikke.
+    naer(efter('fejl')?.usd, 5 * 0.22 * 0.5)
+    expect(efter('fejl')?.hvorfor).toBe('5 værktøjskald fejlede, mest kommandoer, der fejlede (4), og hver fejl kostede en ekstra runde.')
+    expect(efter('fejl')?.handling).toBe('Skriv de kommandoer og stier, der virker, i CLAUDE.md, så Claude ikke skal prøve sig frem.')
+  })
+
+  test('subagenter på xhigh, en dyr model i chatten og forbrugsgrænsen giver hver et råd', () => {
+    const sub = [
+      ...Array.from({ length: 30 }, (_, i) => trin('a1', i, { effort: 'xhigh', output: 10_000 })),
+      ...Array.from({ length: 5 }, (_, i) => trin('a2', i, { effort: 'high' })),
+    ]
+    const hoved = Array.from({ length: 20 }, (_, i) => trin('', i, { model: 'claude-fable-5-1' }))
+    const g: Grundlag = {
+      projekt: projekt(60, 20, { antal: 3, usd: 4.2 }),
+      opgaver: [{ o: medRaa(opgave(2, 'Kør workflowet', 60), [...hoved, ...sub]), a: analyse({}) }],
+      overhead: null,
+    }
+    const liste = raad(g)
+    const efter = (id: string) => liste.find(r => r.id === id)
+
+    // For få kald på high til at måle forskellen, så skønnet er 25 %.
+    naer(efter('agent-effort')?.usd, 30 * 10_000 * 20e-6 * 0.25)
+    expect(efter('agent-effort')?.hvorfor).toBe('Subagenter på xhigh eller max kostede $6.60, 97% af subagenternes pris.')
+    expect(efter('agent-effort')?.eksempler).toEqual(['30 af 35 subagent-kald kørte på xhigh eller max'])
+    // Rådet om subagenter gælder kun de $20 − $6.60, der ikke kørte på høj effort.
+    naer(efter('subagenter')?.usd, Math.max(0, 20 - 30 * (100_000 * 0.2e-6 + 10_000 * 20e-6)) * 0.3)
+
+    // Fable 5.1: 100k × 0,25 $/M + 1.000 × 50 $/M = $0.075 pr. kald; Opus 5.5: $0.04.
+    naer(efter('dyr-model')?.usd, 20 * (0.075 - 0.04) * 0.5)
+    expect(efter('dyr-model')?.hvorfor).toBe('Fable 5.1 kostede $1.50 i chatten. Samme arbejde på Opus 5.5 havde kostet ca. $0.80.')
+    expect(efter('dyr-model')?.handling).toBe('Brug Fable 5.1 til de sværeste opgaver og Opus 5.5 til resten. Vælg model, før samtalen starter.')
+    expect(efter('dyr-model')?.kort).toBe('Fable 5.1 kun til det sværeste')
+
+    expect(efter('gammel-model')).toBeUndefined()
+    naer(efter('forbrugsgraense')?.usd, 4.2)
+
+    // En ældre version af standardmodellen er ikke en dyrere klasse, bare dyrere pr. token.
+    const gammel = raad({ projekt: projekt(10), opgaver: [{ o: medRaa(opgave(1, 'Byg', 10), Array.from({ length: 20 }, (_, i) => trin('', i, { model: 'claude-opus-5' }))), a: analyse({}) }], overhead: null })
+    expect(gammel.find(r => r.id === 'dyr-model')).toBeUndefined()
+    // Opus 5: 100k × 0,50 $/M + 1.000 × 25 $/M = $0.075 pr. kald; Opus 5.5: $0.04.
+    naer(gammel.find(r => r.id === 'gammel-model')?.usd, 20 * (0.075 - 0.04))
+    expect(gammel.find(r => r.id === 'gammel-model')?.handling).toBe('Skift til Opus 5.5 i modelvælgeren; den er nyere og billigere pr. token.')
+    expect(efter('forbrugsgraense')?.hvorfor).toBe('Grænsen stoppede 3 subagenter midt i arbejdet, og det, de nåede, gik tabt.')
   })
 
   test('hvert råd står på højst tre linjer med luft imellem; eksemplerne kun uden bjælker', () => {

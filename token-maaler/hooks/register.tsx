@@ -24,7 +24,7 @@ const PANE = 'token-maaler'
 const HISTORIK_VAERKTOEJ = 'mcp__token-maaler__historik'
 const FIRE_MB = 4 * 1024 * 1024
 // Hver samtales resume i $.store; hæv versionen, når reglerne eller resumeet ændres.
-const INDSIGT = 'indsigt:v1:'
+const INDSIGT = 'indsigt:v3:'
 const HENTER = 'Samler indsigt fra alle samtaler …'
 
 // Indstillingerne fra /config (plugin.json `userConfig`); en ændring dér indlæser modulet igen.
@@ -133,11 +133,11 @@ const findAgenter = async ($: EngineInterface, mappe: string, soeg: string) => {
 const cache = new Map<string, { stoerrelse: number; mtimeMs: number; samling: Samling }>()
 
 // `husk` gemmer filen i hukommelsen til næste gang; det gør kun den aktive sessions filer.
-const samlingFor = async ($: EngineInterface, sti: string, kilde: Kilde, husk = true): Promise<Samling> => {
+const samlingFor = async ($: EngineInterface, sti: string, kilde: Kilde, husk = true, session = ''): Promise<Samling> => {
   const stat = await $.fs.stat(sti)
   const gemt = cache.get(sti)
   if (gemt && gemt.stoerrelse === stat.size && gemt.mtimeMs === stat.mtimeMs) return gemt.samling
-  const samling = nySamling(kilde)
+  const samling = nySamling(kilde, session)
   await hverLinje($, sti, stat.size, linje => laesLinje(samling, linje))
   if (husk) cache.set(sti, { stoerrelse: stat.size, mtimeMs: stat.mtimeMs, samling })
   return samling
@@ -163,7 +163,7 @@ const kildeFor = async ($: EngineInterface, fil: string): Promise<Kilde> => {
 const laesSession = async ($: EngineInterface, mappe: string, id: string, husk = true): Promise<Projekt | null> => {
   const hovedfil = `${mappe}/${id}.jsonl`
   if (!(await $.fs.exists(hovedfil))) return null
-  const samlinger = [await samlingFor($, hovedfil, { id: '', beskrivelse: '', type: '' }, husk)]
+  const samlinger = [await samlingFor($, hovedfil, { id: '', beskrivelse: '', type: '' }, husk, id)]
   for (const fil of await jsonlFiler($, `${mappe}/${id}/subagents`)) samlinger.push(await samlingFor($, fil, await kildeFor($, fil), husk))
   return { ...projekt(samlinger), id }
 }

@@ -52,6 +52,41 @@ const testprojekt = () => {
 const naer = (faktisk: number | undefined, forventet: number) => expect(Math.abs((faktisk ?? NaN) - forventet)).toBeLessThan(1e-9)
 
 describe('projekt', () => {
+  test('det endelige output tæller, kopierede linjer fra en anden session springes over, og fejl, billeder og grænser huskes', () => {
+    const hoved = nySamling(undefined, 'egen')
+    const linjer = [
+      // En forgrenet samtale starter med en kopi af den oprindelige; den er talt med dér.
+      JSON.stringify({ type: 'user', timestamp: '2026-10-01T09:00:00.000Z', sessionId: 'gammel', message: { content: 'Gammel opgave' } }),
+      JSON.stringify({ type: 'assistant', timestamp: '2026-10-01T09:01:00.000Z', sessionId: 'gammel', message: { id: 'g1', model: 'claude-opus-5-5', usage: m1, content: [] } }),
+      JSON.stringify({ type: 'user', timestamp: '2026-10-02T09:00:00.000Z', sessionId: 'egen', message: { content: 'Tjek siden' } }),
+      // Mens kaldet strømmer, står et foreløbigt output på første linje.
+      JSON.stringify({ type: 'assistant', timestamp: '2026-10-02T09:01:00.000Z', sessionId: 'egen', effort: 'xhigh', message: { id: 'e1', model: 'claude-opus-5-5', usage: { ...m1, output_tokens: 8 }, content: [{ type: 'thinking' }] } }),
+      JSON.stringify({ type: 'assistant', timestamp: '2026-10-02T09:01:01.000Z', sessionId: 'egen', message: { id: 'e1', model: 'claude-opus-5-5', usage: m1, content: [{ type: 'tool_use', id: 'b1', name: 'mcp__Claude_Browser__computer', input: {} }, { type: 'tool_use', id: 'b2', name: 'Bash', input: { description: 'Kør testene' } }] } }),
+      JSON.stringify({ type: 'user', timestamp: '2026-10-02T09:02:00.000Z', sessionId: 'egen', message: { content: [
+        { type: 'tool_result', tool_use_id: 'b1', content: [{ type: 'image', source: {} }] },
+        { type: 'tool_result', tool_use_id: 'b2', is_error: true, content: 'Exit code 1' },
+      ] } }),
+      JSON.stringify({ type: 'assistant', timestamp: '2026-10-02T09:03:00.000Z', sessionId: 'egen', error: 'rate_limit', message: { id: 'r1', model: '<synthetic>', usage: { output_tokens: 0 }, content: [] } }),
+    ]
+    for (const l of linjer) laesLinje(hoved, l)
+    const p = projekt([hoved])
+
+    expect(p.opgaver.map(o => o.tekst)).toEqual(['Tjek siden'])
+    expect(p.opgaver[0]?.raa.trin[0]?.output).toBe(300)
+    expect(p.opgaver[0]?.raa.trin[0]?.effort).toBe('xhigh')
+    expect(p.opgaver[0]?.raa.kald.map(k => [k.billeder, k.fejl])).toEqual([[1, undefined], [undefined, 'kommando']])
+    expect(p.graense).toBe(1)
+    naer(p.usd, kaldUsd('claude-opus-5-5', m1))
+
+    // En subagent, der sluttede på en afvisning, stoppede midt i arbejdet.
+    const sub = nySamling({ id: 'a1', beskrivelse: 'Byg', type: '' })
+    laesLinje(sub, assistent('s9', '2026-10-02T09:02:30.000Z', m2))
+    laesLinje(sub, JSON.stringify({ type: 'assistant', timestamp: '2026-10-02T09:02:40.000Z', error: 'rate_limit', message: { id: 's10', model: '<synthetic>', usage: { output_tokens: 0 }, content: [] } }))
+    const q = projekt([hoved, sub])
+    expect(q.stoppet.antal).toBe(1)
+    naer(q.stoppet.usd, kaldUsd('claude-opus-5-5', m2))
+  })
+
   test('linjer for samme kald lægges sammen, og kun brugerens egne beskeder er opgaver', () => {
     const p = testprojekt()
 

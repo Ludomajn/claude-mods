@@ -18,6 +18,7 @@ export type Svar = {
   t: number
   model: string
   brug: Brug
+  effort: string
   tekstTegn: number
   tekst: string
   vaerktoejer: { id: string; etiket: string; tegn: number }[]
@@ -30,12 +31,23 @@ export type Kilde = Agent & { id: string }
 
 export type Samling = {
   kilde: Kilde
+  // Sessionens eget id; linjer fra en anden session (en kopi, fx en forgrening) tælles ikke med igen.
+  session: string
   svar: Map<string, Svar>
   resultater: Map<string, number>
+  // Værktøjskald, der fejlede, med fejlens slags.
+  fejl: Map<string, Fejlslags>
+  // Antal billeder i et værktøjsresultat, fx skærmbilleder.
+  billeder: Map<string, number>
   beskeder: Besked[]
   afbrud: number[]
   titel: string
+  // Gange forbrugsgrænsen afviste et kald, og om filen sluttede med en afvisning.
+  graense: number
+  stoppet: boolean
 }
+
+export type Fejlslags = 'afvist' | 'tilladelse' | 'kommando' | 'timeout' | 'findes ikke' | 'andet'
 
 export type Dagsopgave = { nr: number; tekst: string; usd: number }
 
@@ -77,17 +89,25 @@ export type Projekt = {
   tokens: number
   kald: number
   subUsd: number
+  // Gange forbrugsgrænsen blev ramt, og de subagenter, der stoppede midt i arbejdet af den grund.
+  graense: number
+  stoppet: { antal: number; usd: number }
 }
 
 const HOVED: Kilde = { id: '', beskrivelse: '', type: '' }
 
-export const nySamling = (kilde: Kilde = HOVED): Samling => ({
+export const nySamling = (kilde: Kilde = HOVED, session = ''): Samling => ({
   kilde,
+  session,
   svar: new Map(),
   resultater: new Map(),
+  fejl: new Map(),
+  billeder: new Map(),
   beskeder: [],
   afbrud: [],
   titel: '',
+  graense: 0,
+  stoppet: false,
 })
 
 // Listepris for ét kald; cache-skrivninger koster 1,25 × input (5 minutter) eller 2 × (1 time).
@@ -143,22 +163,52 @@ const TEKST = 1_500
 // Et billede i et værktøjsresultat fylder omtrent som 1.400 tokens tekst.
 const BILLEDE = 5_000
 
+const billederI = (indhold: unknown): number => blokke(indhold).filter(b => b.type === 'image').length
+
+const tekstAf = (indhold: unknown): string =>
+  typeof indhold === 'string' ? indhold : blokke(indhold).flatMap(b => (b.type === 'text' && typeof b.text === 'string' ? [b.text] : [])).join(' ')
+
+// Hvorfor et værktøjskald fejlede, ud fra fejlteksten.
+export const fejlslags = (tekst: string): Fejlslags =>
+  /user (doesn't want|rejected|denied)|the user (doesn't|did not|declined)/i.test(tekst)
+    ? 'afvist'
+    : /permission|not permitted|sandbox|denied/i.test(tekst)
+      ? 'tilladelse'
+      : /timed? ?out/i.test(tekst)
+        ? 'timeout'
+        : /exit code/i.test(tekst)
+          ? 'kommando'
+          : /does not exist|no such file|not found/i.test(tekst)
+            ? 'findes ikke'
+            : 'andet'
+
 const tegnAf = (indhold: unknown): number =>
   typeof indhold === 'string'
     ? indhold.length
     : blokke(indhold).reduce((sum, b) => sum + (b.type === 'text' && typeof b.text === 'string' ? b.text.length : b.type === 'image' ? BILLEDE : 0), 0)
 
+// En linje kopieret fra en anden session, fx da samtalen blev forgrenet; den er talt med dér.
+const fremmed = (s: Samling, m: Record<string, unknown>) =>
+  s.session !== '' && s.kilde.id === '' && typeof m.sessionId === 'string' && m.sessionId !== s.session
+
 export const laesLinje = (s: Samling, linje: string): void => {
   if (linje.includes('"type":"assistant"')) {
     const m = tolk(linje)
-    const besked = m?.message as { id?: unknown; model?: unknown; usage?: Brug; content?: unknown } | undefined
-    const t = Date.parse(String(m?.timestamp))
-    if (m?.type !== 'assistant' || !besked?.usage || Number.isNaN(t)) return
+    if (m?.type !== 'assistant' || fremmed(s, m)) return
+    s.stoppet = m.error === 'rate_limit'
+    if (s.stoppet) s.graense += 1
+    const besked = m.message as { id?: unknown; model?: unknown; usage?: Brug; content?: unknown } | undefined
+    const t = Date.parse(String(m.timestamp))
+    if (!besked?.usage || Number.isNaN(t)) return
     const id = typeof besked.id === 'string' ? besked.id : `uden-id-${t}-${s.svar.size}`
     let svar = s.svar.get(id)
     if (!svar) {
-      svar = { id, t, model: typeof besked.model === 'string' ? besked.model : '', brug: besked.usage, tekstTegn: 0, tekst: '', vaerktoejer: [] }
+      const effort = typeof m.effort === 'string' ? m.effort : ''
+      svar = { id, t, model: typeof besked.model === 'string' ? besked.model : '', brug: besked.usage, effort, tekstTegn: 0, tekst: '', vaerktoejer: [] }
       s.svar.set(id, svar)
+    } else if ((besked.usage.output_tokens ?? 0) > (svar.brug.output_tokens ?? 0)) {
+      // Et kald skrives på flere linjer, mens det strømmer; den sidste har det endelige output.
+      svar.brug = besked.usage
     }
     for (const b of blokke(besked.content)) {
       if (b.type === 'text' && typeof b.text === 'string') {
@@ -177,10 +227,16 @@ export const laesLinje = (s: Samling, linje: string): void => {
   if (linje.includes('"type":"user"')) {
     const m = tolk(linje)
     const t = Date.parse(String(m?.timestamp))
-    if (m?.type !== 'user' || Number.isNaN(t) || m.isCompactSummary) return
+    if (m?.type !== 'user' || Number.isNaN(t) || m.isCompactSummary || fremmed(s, m)) return
     const indhold = (m.message as { content?: unknown } | undefined)?.content
     const resultater = blokke(indhold).filter(b => b.type === 'tool_result')
-    for (const b of resultater) if (typeof b.tool_use_id === 'string') s.resultater.set(b.tool_use_id, tegnAf(b.content))
+    for (const b of resultater) {
+      if (typeof b.tool_use_id !== 'string') continue
+      s.resultater.set(b.tool_use_id, tegnAf(b.content))
+      const billeder = billederI(b.content)
+      if (billeder > 0) s.billeder.set(b.tool_use_id, billeder)
+      if ((b as { is_error?: unknown }).is_error === true) s.fejl.set(b.tool_use_id, fejlslags(tekstAf(b.content)))
+    }
     if (resultater.length || m.isMeta) return
     const tekst = brugerTekst(indhold)
     if (tekst.startsWith('[Request interrupted')) s.afbrud.push(t)
@@ -207,6 +263,7 @@ const tilTrin = (svar: Svar, loop: string, index: number): Trin => ({
   loop,
   index,
   model: svar.model,
+  effort: svar.effort,
   input: svar.brug.input_tokens ?? 0,
   output: svar.brug.output_tokens ?? 0,
   cacheLaes: svar.brug.cache_read_input_tokens ?? 0,
@@ -254,6 +311,8 @@ export const projekt = (samlinger: readonly Samling[]): Projekt => {
   const beskeder = samlinger.flatMap(s => s.beskeder).sort((a, b) => a.t - b.t)
   const afbrud = samlinger.flatMap(s => s.afbrud)
   const resultater = new Map(samlinger.flatMap(s => [...s.resultater]))
+  const fejl = new Map(samlinger.flatMap(s => [...s.fejl]))
+  const billeder = new Map(samlinger.flatMap(s => [...s.billeder]))
 
   // Hver besked er en opgave; et kald hører til den seneste besked før det.
   const prOpgave: Kaldpost[][] = beskeder.map(() => [])
@@ -281,7 +340,16 @@ export const projekt = (samlinger: readonly Samling[]): Projekt => {
       ttl: ttlAf(hoved),
       forrigePrompt,
       trin: [...hoved.map((k, j) => tilTrin(k.svar, '', j)), ...subTrin(egne)],
-      kald: hoved.flatMap((k, j) => k.svar.vaerktoejer.map(v => ({ loop: '', trin: j, etiket: v.etiket, tegn: resultater.get(v.id) ?? 0 }))),
+      kald: hoved.flatMap((k, j) =>
+        k.svar.vaerktoejer.map(v => ({
+          loop: '',
+          trin: j,
+          etiket: v.etiket,
+          tegn: resultater.get(v.id) ?? 0,
+          ...(fejl.has(v.id) ? { fejl: fejl.get(v.id) } : {}),
+          ...(billeder.has(v.id) ? { billeder: billeder.get(v.id) } : {}),
+        })),
+      ),
       agenter: Object.fromEntries(egne.filter(k => k.kilde.id !== '').map(k => [k.kilde.id, { beskrivelse: k.kilde.beskrivelse, type: k.kilde.type }])),
       kontekst: [],
     }
@@ -349,6 +417,7 @@ export const projekt = (samlinger: readonly Samling[]): Projekt => {
   for (const o of opgaver) o.dagNr = dagNr.get(o.dato) ?? 0
 
   const samlet = (f: (d: Dag) => number) => dage.reduce((s, d) => s + f(d), 0)
+  const stoppede = new Set(samlinger.filter(s => s.kilde.id !== '' && s.stoppet).map(s => s.kilde.id))
   return {
     id: '',
     titel: samlinger.find(s => s.titel)?.titel ?? '',
@@ -358,6 +427,8 @@ export const projekt = (samlinger: readonly Samling[]): Projekt => {
     tokens: samlet(d => d.tokens),
     kald: kald.length,
     subUsd: samlet(d => d.subUsd),
+    graense: samlinger.reduce((n, s) => n + s.graense, 0),
+    stoppet: { antal: stoppede.size, usd: kald.filter(k => stoppede.has(k.kilde.id)).reduce((n, k) => n + k.usd, 0) },
   }
 }
 

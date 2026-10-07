@@ -5,6 +5,7 @@ export type Trin = {
   loop: string // '' er hovedsamtalen, ellers subagentens id
   index: number
   model: string
+  effort?: string
   input: number
   output: number
   cacheLaes: number
@@ -14,7 +15,7 @@ export type Trin = {
 }
 
 // Ét værktøjskald og længden af det resultat, modellen fik tilbage.
-export type Kald = { loop: string; trin: number; etiket: string; tegn: number }
+export type Kald = { loop: string; trin: number; etiket: string; tegn: number; fejl?: string; billeder?: number }
 
 export type Agent = { beskrivelse: string; type: string }
 
