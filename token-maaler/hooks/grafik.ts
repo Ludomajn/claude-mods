@@ -65,23 +65,20 @@ const graenseTooltip = (g: Graense, nu: number) => {
   return `${NAVN[g.kind]?.lang ?? g.kind}: ${pct(brugt(g, nu))} brugt${n ? `, nulstilles ${n}` : ''}`
 }
 
-// Målerne til båndet: to små bjælker på én linje, lige så høje som teksten.
-export const maalerSvgLille = (graenser: readonly Graense[], nu: number): Tegning => {
-  const vist = vistGraenser(graenser)
-  const bred = 160
-  const dele = vist.map((g, i) => {
-    const x = i * bred
-    const p = brugt(g, nu)
-    const w = Math.max(p > 0 ? 2 : 0, Math.min(100, p) * 0.6)
-    return [
-      `<text x="${x}" y="14" fill="${TEKST}" font-size="13" ${SKRIFT}>${xml(NAVN[g.kind]?.kort ?? g.kind)}</text>`,
-      `<rect x="${x + 34}" y="6" width="60" height="7" rx="3.5" fill="${SPOR}"/>`,
-      `<rect x="${x + 34}" y="6" width="${w.toFixed(1)}" height="7" rx="3.5" fill="${fyld(p)}"/>`,
-      `<text x="${x + 102}" y="14" fill="${TEKST}" font-size="13" ${SKRIFT}>${pct(p)}</text>`,
-    ].join('')
-  })
-  return svg(Math.max(1, vist.length * bred - 20), 18, dele.join(''))
+// Én lille bjælke til båndet. Etiket og procent står som almindelig tekst ved siden af, så de
+// flugter med båndets tekst og knapper.
+export const bjaelkeSvg = (p: number): Tegning => {
+  const w = Math.max(p > 0 ? 3 : 0, (Math.min(100, p) / 100) * 56)
+  return svg(
+    56,
+    8,
+    `<rect x="0" y="0" width="56" height="8" rx="4" fill="${SPOR}"/><rect x="0" y="0" width="${w.toFixed(1)}" height="8" rx="4" fill="${fyld(p)}"/>`,
+  )
 }
+
+export const kortNavn = (g: Graense): string => NAVN[g.kind]?.kort ?? g.kind
+
+export const procentTekst = (p: number): string => pct(p)
 
 // Målerne til panelet: én række pr. grænse med hvornår den nulstilles.
 export const maalerSvgStor = (graenser: readonly Graense[], nu: number): Tegning => {

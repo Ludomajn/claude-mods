@@ -61,7 +61,6 @@ declare module 'claude-code' {
       paneNr: number | null
       paneAntal: number
       paneLinjer: string[]
-      raad: { id: string; titel: string; usd: number }[]
       graenser: Graense[]
       forbrugGrafik: ForbrugGrafik | null
     }

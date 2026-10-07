@@ -9,7 +9,7 @@ import type { HistOpgave, Kilde, Projekt, Samling } from './historik'
 import { indsigtTekst, ugensSamtalerTekst } from './indsigt'
 import type { Resume } from './indsigt'
 import { graenseForbrug, KVARTER, maal, maalKr, median, minutter, saetEnhed, VINDUER } from './enhed'
-import { maalerSvgLille, maalerSvgStor, maalerTekst, soejlerSvg, soejlerTekst, vistGraenser } from './grafik'
+import { bjaelkeSvg, brugt, kortNavn, maalerSvgStor, maalerTekst, procentTekst, soejlerSvg, soejlerTekst, vistGraenser } from './grafik'
 import type { Maaling } from './enhed'
 import {
   ANALYSE_SYSTEM,
@@ -34,7 +34,6 @@ const paneVisning = atom({ plugin: 'token-maaler', key: 'paneVisning' } as const
 const paneNr = atom({ plugin: 'token-maaler', key: 'paneNr' } as const, null)
 const paneAntal = atom({ plugin: 'token-maaler', key: 'paneAntal' } as const, 0)
 const paneLinjer = atom({ plugin: 'token-maaler', key: 'paneLinjer' } as const, [])
-const raadListe = atom({ plugin: 'token-maaler', key: 'raad' } as const, [])
 const velkomstSkjult = atom({ plugin: 'token-maaler', key: 'velkomstSkjult' } as const, false)
 const graenser = atom({ plugin: 'token-maaler', key: 'graenser' } as const, [])
 const forbrugGrafik = atom({ plugin: 'token-maaler', key: 'forbrugGrafik' } as const, null)
@@ -483,18 +482,6 @@ const promptsmartFor = (
   return promptsmartIgang
 }
 
-// Efter hver opgave regner analytikeren rådene igen; båndet viser, hvor mange der er.
-const tjekRaad = async ($: EngineInterface) => {
-  try {
-    const p = await hentProjekt($, '')
-    if (typeof p === 'string') return
-    const liste = await raadFor($, p)
-    await update($, raadListe, () => liste.map(r => ({ id: r.id, titel: r.navn, usd: r.usd })))
-  } catch {
-    // Et råd må aldrig forstyrre arbejdet.
-  }
-}
-
 const tekstFor = async ($: EngineInterface, p: Projekt, visning: Visning | 'dag', nr: number | null, visuel: boolean) => {
   if (visning === 'raad') return raadTekst(p.titel || 'dette projekt', await raadFor($, p), visuel)
   if (visning === 'opgave' && nr !== null) {
@@ -856,8 +843,6 @@ export const register: Register = (on, options) => {
       if (indstillinger.beskeder) {
         $.ui.toast(`Opgaven brugte ${opgave.usd !== null ? graenseForbrug(opgave.usd) : `${fmt(opgave.ind + opgave.ud)} tokens`} · ${minutter(opgave.sekunder)}`)
       }
-      // Analytikeren kigger på hele projektet lidt efter, når transcriptet er skrevet færdigt.
-      $.clock.after(3_000, () => void tjekRaad($))
     } catch {
       // En fejl i analysen må ikke stoppe turen.
     }
@@ -899,11 +884,19 @@ export const register: Register = (on, options) => {
     const { Box, Button, Text } = el
     const g = await read($, graenser)
     const nu = await $.clock.now()
-    // Målerne for 5-timersgrænsen og ugens grænse efter knapperne: en lille graf, i terminalen som tekst.
+    // Målerne for 5-timersgrænsen og ugens grænse efter knapperne: etiket og procent som tekst og en
+    // lille bjælke imellem, så alt flugter med knapperne. I terminalen er bjælken tegn.
+    const vist = vistGraenser(g)
     const maaler =
-      vistGraenser(g).length === 0 ? null : 'Svg' in el && e.surface !== 'terminal' ? (
-        <Box marginLeft={1}>
-          <el.Svg {...maalerSvgLille(g, nu)} alt={maalerTekst(g, nu)} />
+      vist.length === 0 ? null : 'Svg' in el && e.surface !== 'terminal' ? (
+        <Box alignItems="center" gap={2} marginLeft={1}>
+          {vist.map(x => (
+            <Box key={x.kind} alignItems="center" gap={1}>
+              <Text dimColor>{kortNavn(x)}</Text>
+              <el.Svg {...bjaelkeSvg(brugt(x, nu))} alt={`${kortNavn(x)} ${procentTekst(brugt(x, nu))}`} />
+              <Text dimColor>{procentTekst(brugt(x, nu))}</Text>
+            </Box>
+          ))}
         </Box>
       ) : (
         <Text dimColor> {maalerTekst(g, nu)}</Text>
@@ -925,7 +918,6 @@ export const register: Register = (on, options) => {
       )
     }
     if (!indstillinger.baand || (await read($, skjult))) return next(e)
-    const raadAntal = (await read($, raadListe)).length
 
     return (
       <Box alignItems="center" justifyContent="space-between" width="100%">
@@ -937,14 +929,6 @@ export const register: Register = (on, options) => {
             onPress={async () => {
               await visPanel($, 'opgave', null)
               await aabnPanel($, '/tokens <nr>')
-            }}
-          />
-          <Button
-            key="raad"
-            label={raadAntal > 0 ? `Råd (${raadAntal})` : 'Råd'}
-            onPress={async () => {
-              await visPanel($, 'raad', null)
-              await aabnPanel($, '/tokens råd')
             }}
           />
           <Button key="indsigt" label="Indsigt" onPress={() => visIndsigt($)} />
