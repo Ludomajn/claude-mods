@@ -5,7 +5,7 @@ import { analysePrompt, kaederFra, loft, punkterFra, renPrompt } from './prompts
 
 const opgave = (nr: number, fuld: string, svar = ''): HistOpgave => ({ nr, fuld, svar }) as unknown as HistOpgave
 
-describe('PromptSMART', () => {
+describe('Dine prompts', () => {
   test('kæder fra Opus beholder kun beskeder, der findes og kom efter den første', () => {
     const opgaver = [opgave(1, 'Lav et banner'), opgave(2, 'Nej, i bunden'), opgave(3, 'Push')]
     const svar = 'Her er det: {"kaeder": [{"start": 1, "rettelser": [2, 1, 7, 2], "oenske": "Banner i bunden", "manglede": "placering"}, {"start": 3, "rettelser": []}, {"start": 9, "rettelser": [10]}]}'

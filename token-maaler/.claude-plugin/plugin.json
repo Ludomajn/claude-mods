@@ -1,13 +1,13 @@
 {
   "name": "token-maaler",
-  "version": "0.9.4",
+  "version": "0.9.5",
   "description": "Viser hvad projektet, hver opgave og hver dag kostede i tokens og penge, og giver råd til at bruge færre",
   "types": "./types/index.d.ts",
   "userConfig": {
     "velkomst": {
       "type": "boolean",
       "title": "Velkomst i nye samtaler",
-      "description": "Vis \"Bliv klogere på dit forbrug og dine prompts\" med knapperne Indsigt og PromptSMART, indtil den første opgave er færdig.",
+      "description": "Vis \"Bliv klogere på dit forbrug og dine prompts\" med knapperne Indsigt og Dine prompts, indtil den første opgave er færdig.",
       "default": true
     },
     "baand": {
@@ -30,8 +30,8 @@
     },
     "promptsmart": {
       "type": "boolean",
-      "title": "PromptSMART",
-      "description": "Vis knappen PromptSMART ved siden af Indsigt. Når du trykker, analyserer Claude Opus dine dyreste samtaler, Claude Sonnet skriver bedre første prompts, og Claude Haiku skriver forklaringerne. Sender uddrag af samtalerne; prisen står under resultatet.",
+      "title": "Dine prompts",
+      "description": "Vis knappen Dine prompts ved siden af Indsigt. Når du trykker, analyserer Claude Opus dine dyreste samtaler, Claude Sonnet skriver bedre første prompts, og Claude Haiku skriver forklaringerne. Sender uddrag af samtalerne; prisen står under resultatet.",
       "default": true
     }
   }

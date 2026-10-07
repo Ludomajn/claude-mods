@@ -2,7 +2,7 @@ import { afkort, afkortOrd, bjaelke } from './analyse'
 import type { HistOpgave } from './historik'
 import { beloeb, MEST } from './raad'
 
-// PromptSMART: hvor en første prompt manglede noget, så brugeren måtte rette bagefter, og hvordan
+// Dine prompts: hvor en første prompt manglede noget, så brugeren måtte rette bagefter, og hvordan
 // prompten kunne have lydt. Tre modeller deler arbejdet: Opus analyserer samtalen, Sonnet skriver
 // den bedre prompt, og Haiku skriver det, brugeren læser.
 export const MODEL = { analyse: 'opus', arbejde: 'sonnet', kommunikation: 'haiku' } as const
@@ -126,7 +126,7 @@ export const renPrompt = (svar: string): string =>
     .trim()
 
 export const promptsmartTekst = (liste: readonly PromptRaad[], samtaler: number, visuel = true): string[] => {
-  const ud = ['**PromptSMART**', 'Prompts, der kunne have ramt første gang · beløb = hvad rettelserne bagefter kostede']
+  const ud = ['**Dine prompts**', 'Prompts, der kunne have ramt første gang · beløb = hvad rettelserne bagefter kostede']
   const vist = [...liste].sort((a, b) => b.usd - a.usd).slice(0, MEST)
   const stoerst = vist[0]?.usd ?? 0
   if (vist.length === 0) ud.push('', 'Ingen prompts at forbedre: de første beskeder ramte, eller det, der fulgte, var nye opgaver.')

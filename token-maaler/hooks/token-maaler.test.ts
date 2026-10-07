@@ -342,7 +342,7 @@ test('analytikeren giver et råd efter en opgave i en lang samtale og gentager d
   expect(tekst).toContain('→ Skriv `/compact`, når en opgave er færdig')
 })
 
-test('PromptSMART: Opus finder rettelserne, Sonnet skriver prompten, Haiku forklarer, og forslagene huskes', async ($, on) => {
+test('Dine prompts: Opus finder rettelserne, Sonnet skriver prompten, Haiku forklarer, og forslagene huskes', async ($, on) => {
   mock.clock(on)
   mock.store(on)
   toMapper(on, new Set())
@@ -365,7 +365,7 @@ test('PromptSMART: Opus finder rettelserne, Sonnet skriver prompten, Haiku forkl
 
   const tekst = (await $.command.run({ command: 'tokens', args: 'promptsmart' } as never)).text ?? ''
   expect(tekst.split('\n')).toEqual([
-    '**PromptSMART**',
+    '**Dine prompts**',
     'Prompts, der kunne have ramt første gang · beløb = hvad rettelserne bagefter kostede',
     '',
     '██████████ **$0.040 · Forside med kontakt** · Webshop-agent',
@@ -377,22 +377,22 @@ test('PromptSMART: Opus finder rettelserne, Sonnet skriver prompten, Haiku forkl
   expect(kaldt.sort()).toEqual(['haiku:low', 'opus:high', 'opus:high', 'sonnet:medium'])
 
   // Uændrede samtaler analyseres ikke igen.
-  await $.command.run({ command: 'promptsmart', args: '' } as never)
+  await $.command.run({ command: 'prompts', args: '' } as never)
   expect(kaldt).toHaveLength(4)
 
   const baand = await $.ui.mount({ plugin: 'token-maaler', surface: 'desktop', component: 'AbovePrompt', props: baandProps } as never)
-  expect((await baand.find({ key: 'promptsmart' }))?.props.label).toBe('PromptSMART')
+  expect((await baand.find({ key: 'promptsmart' }))?.props.label).toBe('Dine prompts')
   await baand.press({ key: 'promptsmart' })
   await baand.unmount()
   const panel = await $.ui.mount({ plugin: 'token-maaler', surface: 'desktop', component: 'Pane', requestId: 'token-maaler', props: panelProps } as never)
-  expect((await panel.find({ type: 'Text', text: /^PromptSMART$/ }))?.props.bold).toBe(true)
+  expect((await panel.find({ type: 'Text', text: /^Dine prompts$/ }))?.props.bold).toBe(true)
   expect((await panel.find({ type: 'Text', text: /^Du skrev: «Byg forsiden»/ }))?.props.dimColor).toBe(true)
   expect((await panel.find({ type: 'Text', text: /^→ Prøv: / }))?.props.color).toBe('green')
   expect(await panel.find({ key: 'promptsmart' })).toBeDefined()
   await panel.unmount()
 })
 
-test('PromptSMART kan slås fra i /config', { options: { promptsmart: false } }, async ($, on) => {
+test('Dine prompts kan slås fra i /config', { options: { promptsmart: false } }, async ($, on) => {
   mock.clock(on)
   on('ui.render', async () => ({ type: 'Box', props: {}, children: [] }) as never)
   const baand = await $.ui.mount({ plugin: 'token-maaler', surface: 'desktop', component: 'AbovePrompt', props: baandProps } as never)
@@ -401,7 +401,7 @@ test('PromptSMART kan slås fra i /config', { options: { promptsmart: false } },
   await baand.unmount()
 })
 
-test('PromptSMART gemmer intet og siger det, når modellerne ikke svarer', async ($, on) => {
+test('Dine prompts gemmer intet og siger det, når modellerne ikke svarer', async ($, on) => {
   mock.clock(on)
   mock.store(on)
   toMapper(on, new Set())
@@ -409,9 +409,9 @@ test('PromptSMART gemmer intet og siger det, når modellerne ikke svarer', async
   on('model.complete', async () =>
     ({ value: svar ? { isAnswered: true, text: '{"kaeder": []}', usage: {} } : { isAnswered: false, reason: 'api-error', status: 401, error: 'authentication_failed', usage: {} } }) as never,
   )
-  expect((await $.command.run({ command: 'promptsmart', args: '' } as never)).text).toBe(
-    'PromptSMART fik ikke svar fra modellerne (opus: authentication_failed). Prøv igen om lidt.',
+  expect((await $.command.run({ command: 'prompts', args: '' } as never)).text).toBe(
+    'Kunne ikke gennemgå dine prompts: modellerne svarede ikke (opus: authentication_failed). Prøv igen om lidt.',
   )
   svar = true
-  expect((await $.command.run({ command: 'promptsmart', args: '' } as never)).text).toContain('Ingen prompts at forbedre')
+  expect((await $.command.run({ command: 'prompts', args: '' } as never)).text).toContain('Ingen prompts at forbedre')
 })

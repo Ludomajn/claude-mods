@@ -40,9 +40,9 @@ const FIRE_MB = 4 * 1024 * 1024
 // Hver samtales resume i $.store; hæv versionen, når reglerne eller resumeet ændres.
 const INDSIGT = 'indsigt:v3:'
 const HENTER = 'Samler indsigt fra alle samtaler …'
-// Hver samtales PromptSMART-forslag i $.store; hæv versionen, når prompterne til modellerne ændres.
+// Hver samtales Dine prompts-forslag i $.store; hæv versionen, når prompterne til modellerne ændres.
 const PROMPTSMART = 'promptsmart:v2:'
-// PromptSMART gennemgår de dyreste samtaler, fordi rettelser dér koster mest.
+// Dine prompts gennemgår de dyreste samtaler, fordi rettelser dér koster mest.
 const PROMPTSMART_SAMTALER = 8
 
 // Indstillingerne fra /config (plugin.json `userConfig`); en ændring dér indlæser modulet igen.
@@ -350,7 +350,7 @@ const indsigtFor = async ($: EngineInterface, visuel: boolean): Promise<string[]
   }
 }
 
-// Ét modelkald i PromptSMART med den model og effort, rollen har.
+// Ét modelkald i Dine prompts med den model og effort, rollen har.
 const spoerg = async ($: EngineInterface, rolle: Rolle, system: string, prompt: string): Promise<string> => {
   const indstilling = {
     analyse: { effort: 'high', maxTokens: 8_000, timeoutMs: 240_000 },
@@ -419,7 +419,7 @@ const promptsmartSamtale = async ($: EngineInterface, p: Projekt, fremgang: Frem
 
 let promptsmartIgang: Promise<string[]> | null = null
 
-// PromptSMART på tværs af de dyreste samtaler. `vis` får fremgangen, mens modellerne arbejder.
+// Dine prompts på tværs af de dyreste samtaler. `vis` får fremgangen, mens modellerne arbejder.
 const promptsmartFor = (
   $: EngineInterface,
   visuel: boolean,
@@ -437,7 +437,7 @@ const promptsmartFor = (
       const fremgang: Fremgang = { samtaler: valgte.length, analyseret: 0, skrevet: 0, klargjort: 0 }
       const visFremgang = () =>
         vis([
-          '**PromptSMART**',
+          '**Dine prompts**',
           `Analyserer: ${fremgang.analyseret} af ${fremgang.samtaler} samtaler`,
           `Forklarer: ${fremgang.skrevet === 1 ? '1 prompt' : `${fremgang.skrevet} prompts`}`,
           `Færdiggør: ${fremgang.klargjort} af ${fremgang.samtaler} samtaler`,
@@ -457,11 +457,11 @@ const promptsmartFor = (
           }
         }),
       )
-      if (fejl.length === valgte.length && fejl.length > 0) return [`PromptSMART fik ikke svar fra modellerne (${fejl[0]}). Prøv igen om lidt.`]
+      if (fejl.length === valgte.length && fejl.length > 0) return [`Kunne ikke gennemgå dine prompts: modellerne svarede ikke (${fejl[0]}). Prøv igen om lidt.`]
       const linjer = promptsmartTekst(alle.flat(), valgte.length - fejl.length, visuel)
       return fejl.length ? [...linjer, `${fejl.length === 1 ? '1 samtale' : `${fejl.length} samtaler`} kunne ikke gennemgås (${fejl[0]}).`] : linjer
     } catch (fejl) {
-      return [`PromptSMART kunne ikke gennemgå samtalerne: ${fejl instanceof Error ? fejl.message : String(fejl)}`]
+      return [`Kunne ikke gennemgå dine prompts: ${fejl instanceof Error ? fejl.message : String(fejl)}`]
     } finally {
       promptsmartIgang = null
     }
@@ -545,7 +545,7 @@ const visIndsigt = async ($: EngineInterface) => {
 
 const visPromptsmart = async ($: EngineInterface) => {
   const klar = visPanel($, 'promptsmart', null)
-  await aabnPanel($, '/tokens promptsmart')
+  await aabnPanel($, '/tokens prompts')
   await klar
 }
 
@@ -574,10 +574,10 @@ export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'tokens',
-      description: 'Projektet: /tokens · én opgave: /tokens <nr> · dage: /tokens dage · råd: /tokens råd · alle samtaler: /tokens råd alle · bedre prompts: /tokens promptsmart',
+      description: 'Projektet: /tokens · én opgave: /tokens <nr> · dage: /tokens dage · råd: /tokens råd · alle samtaler: /tokens råd alle · dine prompts: /tokens prompts',
     })
     if (indstillinger.promptsmart) {
-      await $.command.register({ name: 'promptsmart', description: 'Bedre første prompts ud fra det, du endte med at ville have (Opus analyserer, Sonnet skriver, Haiku forklarer)' })
+      await $.command.register({ name: 'prompts', description: 'Bedre første prompts ud fra det, du endte med at ville have (Opus analyserer, Sonnet skriver, Haiku forklarer)' })
     }
     try {
       await $.tool.register({
@@ -723,7 +723,7 @@ export const register: Register = (on, options) => {
     const ord = e.args.trim().split(/\s+/).filter(Boolean)
     const [foerste = '', ...rest] = ord
     await update($, skjult, () => false)
-    if (foerste.toLowerCase() === 'promptsmart') return { text: (await promptsmartFor($, true)).join('\n') }
+    if (['prompts', 'promptsmart'].includes(foerste.toLowerCase())) return { text: (await promptsmartFor($, true)).join('\n') }
     if (((foerste === 'råd' || foerste === 'raad') && rest.join(' ') === 'alle') || foerste === 'indsigt') {
       return { text: (await indsigtFor($, true)).join('\n') }
     }
@@ -745,7 +745,7 @@ export const register: Register = (on, options) => {
     return { text: typeof p === 'string' ? p : (await tekstFor($, p, visning, nr, true)).join('\n') }
   })
 
-  on('command.run', { command: 'promptsmart' }, async $ => ({ text: (await promptsmartFor($, true)).join('\n') }))
+  on('command.run', { command: 'prompts' }, async $ => ({ text: (await promptsmartFor($, true)).join('\n') }))
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
@@ -759,7 +759,7 @@ export const register: Register = (on, options) => {
         <Box>
           <Text dimColor>Bliv klogere på dit forbrug og dine prompts </Text>
           <Button key="indsigt" label="Indsigt" onPress={() => visIndsigt($)} />
-          {indstillinger.promptsmart && <Button key="promptsmart" label="PromptSMART" onPress={() => visPromptsmart($)} />}
+          {indstillinger.promptsmart && <Button key="promptsmart" label="Dine prompts" onPress={() => visPromptsmart($)} />}
           <Button key="skjul" label="Skjul" onPress={() => update($, velkomstSkjult, () => true)} />
         </Box>
       )
@@ -843,7 +843,7 @@ export const register: Register = (on, options) => {
           <Button key="dage" label="Dage" onPress={() => visPanel($, 'dage', null)} />
           <Button key="raad" label="Råd" onPress={() => visPanel($, 'raad', null)} />
           <Button key="indsigt" label="Indsigt" onPress={() => visPanel($, 'alle', null)} />
-          {indstillinger.promptsmart && <Button key="promptsmart" label="PromptSMART" onPress={() => visPanel($, 'promptsmart', null)} />}
+          {indstillinger.promptsmart && <Button key="promptsmart" label="Dine prompts" onPress={() => visPanel($, 'promptsmart', null)} />}
           {visning === 'opgave' && nr !== null && nr > 1 && (
             <Button key="forrige" label="‹ Forrige" onPress={() => visPanel($, 'opgave', nr - 1)} />
           )}
