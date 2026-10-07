@@ -1,5 +1,5 @@
 import { afkortOrd, bjaelke } from './analyse'
-import { maalForklaring, maalKr } from './enhed'
+import { maal, maalForklaring, maalKr } from './enhed'
 import { beloeb, MEST, raadBlok, restLinje } from './raad'
 import type { Raad } from './raad'
 
@@ -65,4 +65,20 @@ export const indsigtTekst = (liste: readonly Resume[], ekstra: readonly Raad[] =
   ud.push('', '**Dyreste samtaler**')
   for (const s of dyreste) ud.push(`${visuel ? `${bjaelke(top > 0 ? s.usd / top : 0, 10)} ` : ''}${beloeb(s.usd)} · ${afkortOrd(s.titel, 50)}`)
   return ud
+}
+
+// Forbrug: ugen i alt og ugens dyreste samtaler, med bjælker i det godkendte format.
+export const ugensSamtalerTekst = (samtaler: readonly { titel: string; usd: number }[], periode: string, visuel = true): string[] => {
+  if (samtaler.length === 0) return [`Intet forbrug ${periode}.`]
+  const sorteret = [...samtaler].sort((a, b) => b.usd - a.usd)
+  const top = sorteret[0]?.usd ?? 0
+  const vist = sorteret.slice(0, MEST)
+  const rest = sorteret.slice(MEST)
+  return [
+    `I alt ${periode}: ${maalKr(sum(sorteret, s => s.usd))} · ${samtaler.length === 1 ? '1 samtale' : `${samtaler.length} samtaler`}`,
+    '',
+    '**Ugens dyreste samtaler**',
+    ...vist.map(s => `${visuel ? `${bjaelke(top > 0 ? s.usd / top : 0, 10)} ` : ''}${maalKr(s.usd)} · ${afkortOrd(s.titel, 50)}`),
+    ...(rest.length ? [`Plus ${rest.length === 1 ? '1 mindre samtale' : `${rest.length} mindre samtaler`}: ${maal(sum(rest, s => s.usd))}.`] : []),
+  ]
 }

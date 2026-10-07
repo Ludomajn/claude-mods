@@ -6,7 +6,7 @@ import { afkort, analyser, etiket, fmt, kontekstDele, opsummering } from './anal
 import type { Agent, Kald, Trin } from './analyse'
 import { beskrivelsesPrompt, dagTekst, dageTekst, datoNoegle, datoTekst, laesLinje, nySamling, opgaveTekst, projekt, projektTekst, renBeskrivelse, visteOpgaver } from './historik'
 import type { HistOpgave, Kilde, Projekt, Samling } from './historik'
-import { indsigtTekst } from './indsigt'
+import { indsigtTekst, ugensSamtalerTekst } from './indsigt'
 import type { Resume } from './indsigt'
 import { graenseForbrug, KVARTER, maal, maalKr, median, minutter, saetEnhed, VINDUER } from './enhed'
 import { maalerSvgLille, maalerSvgStor, maalerTekst, soejlerSvg, soejlerTekst, vistGraenser } from './grafik'
@@ -511,38 +511,60 @@ const tekstFor = async ($: EngineInterface, p: Projekt, visning: Visning | 'dag'
   return projektTekst(p, visuel, await beskriv($, p, visteOpgaver(p)), raadLinje)
 }
 
-// Forbruget pr. dag i de seneste 7 dage på tværs af alle samtaler, som ugens grænse tæller det.
-const ugensDage = async ($: EngineInterface): Promise<Soejle[]> => {
+// Ugen, som ugens grænse tæller den: fra grænsen sidst blev nulstillet til nu, ellers de seneste
+// 7 dage. Forbruget pr. dag og pr. samtale på tværs af alle samtaler.
+const ugen = async ($: EngineInterface): Promise<{ dage: Soejle[]; periode: string; samtaler: { titel: string; usd: number }[] }> => {
   const egen = await $.session.id()
-  const pr = new Map<string, number>()
+  const nu = await $.clock.now()
+  const kendte = await read($, graenser)
+  const gemte = kendte.length ? kendte : ((await $.store.get(SIDSTE_GRAENSER)) as Graense[] | undefined) ?? []
+  const nulstilles = Date.parse(gemte.find(g => g.kind === 'seven_day')?.resetsAt ?? '')
+  const start = nulstilles - VINDUER.seven_day.ms
+  const iVinduet = !Number.isNaN(nulstilles) && nulstilles > nu && start <= nu
+  const fra = iVinduet ? start : nu - 6 * 86_400_000
+  const periode = !iVinduet ? 'de seneste 7 dage' : `siden ${datoTekst(datoNoegle(fra)).split(' ')[0] ?? ''} kl. ${klokken(fra)}`
+  const datoer: string[] = []
+  for (let t = fra; datoNoegle(t) <= datoNoegle(nu) && datoer.length < 8; t += 86_400_000) {
+    if (!datoer.includes(datoNoegle(t))) datoer.push(datoNoegle(t))
+  }
+  if (!datoer.includes(datoNoegle(nu))) datoer.push(datoNoegle(nu))
+  const fraKvarter = Math.floor(fra / KVARTER)
+  const prDag = new Map<string, number>()
+  const samtaler: { titel: string; usd: number }[] = []
   for (const s of await alleSessioner($)) {
     const r = await resumeFor($, s, egen).catch(() => null)
-    for (const [n, usd] of Object.entries(r?.kvarterer ?? {})) {
+    let usd = 0
+    for (const [n, v] of Object.entries(r?.kvarterer ?? {})) {
+      if (Number(n) < fraKvarter) continue
       const dato = datoNoegle(Number(n) * KVARTER)
-      pr.set(dato, (pr.get(dato) ?? 0) + usd)
+      prDag.set(dato, (prDag.get(dato) ?? 0) + v)
+      usd += v
     }
+    if (r && usd > 0) samtaler.push({ titel: r.titel, usd })
   }
-  const nu = await $.clock.now()
-  return Array.from({ length: 7 }, (_, i) => {
-    const dato = datoNoegle(nu - (6 - i) * 86_400_000)
-    const usd = pr.get(dato) ?? 0
+  const idag = datoNoegle(nu)
+  const dage = datoer.map(dato => {
+    const usd = prDag.get(dato) ?? 0
     const navn = datoTekst(dato)
     return {
-      etiket: i === 6 ? 'i dag' : (navn.split(' ')[0] ?? ''),
+      etiket: dato === idag ? 'i dag' : (navn.split(' ')[0] ?? ''),
       vaerdi: usd,
       tal: usd > 0 ? maal(usd) : '',
       tooltip: `${navn}: ${usd > 0 ? maalKr(usd) : 'intet forbrug'}`,
     }
   })
+  return { dage, periode, samtaler }
 }
 
-// Forbrug: grænserne, ugen pr. dag og projektets dyreste opgaver.
-const forbrugFor = async ($: EngineInterface): Promise<{ grafik: ForbrugGrafik; linjer: string[] }> => {
-  const p = await hentProjekt($, '')
-  const projekt = typeof p === 'string' ? null : p
-  const grafik: ForbrugGrafik = { dage: await ugensDage($).catch(() => []) }
-  const linjer = projekt ? await tekstFor($, projekt, 'projekt', null, true) : [String(p)]
-  return { grafik, linjer }
+const klokken = (t: number) => {
+  const d = new Date(t)
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
+// Forbrug på tværs af alle samtaler: grænserne, ugen pr. dag og ugens dyreste samtaler.
+const forbrugFor = async ($: EngineInterface, visuel = true): Promise<{ grafik: ForbrugGrafik; linjer: string[] }> => {
+  const { dage, periode, samtaler } = await ugen($).catch(() => ({ dage: [], periode: 'de seneste 7 dage', samtaler: [] }))
+  return { grafik: { dage, periode }, linjer: ugensSamtalerTekst(samtaler, periode, visuel) }
 }
 
 // Forbrug som tekst, til terminalen og /tokens forbrug.
@@ -554,7 +576,7 @@ const forbrugTekst = async ($: EngineInterface): Promise<string[]> => {
     '**Forbrug**',
     vistGraenser(g).length ? maalerTekst(g, nu) : 'Grænserne vises, når Claude har svaret første gang.',
     '',
-    '**Ugen pr. dag** · alle samtaler',
+    `**Ugen pr. dag** · ${grafik.periode} · alle samtaler`,
     ...soejlerTekst(grafik.dage),
     '',
     ...linjer,
@@ -990,7 +1012,7 @@ export const register: Register = (on, options) => {
             )}
             <Box marginTop={1}>
               <Text bold>Ugen pr. dag</Text>
-              <Text dimColor> · alle samtaler</Text>
+              <Text dimColor> · {grafik.periode} · alle samtaler</Text>
             </Box>
             {'Svg' in el && e.surface !== 'terminal' ? (
               <el.Svg source={soejlerSvg(grafik.dage)} alt={soejlerTekst(grafik.dage).join('\n')} isInteractive />

@@ -49,7 +49,7 @@ export type Graense = { kind: string; percentUsed: number; resetsAt?: string }
 export type Soejle = { etiket: string; vaerdi: number; tal: string; tooltip: string }
 
 // Det, Forbrug-visningen tegner ud over teksten.
-export type ForbrugGrafik = { dage: Soejle[] }
+export type ForbrugGrafik = { dage: Soejle[]; periode: string }
 
 declare module 'claude-code' {
   interface PluginState {

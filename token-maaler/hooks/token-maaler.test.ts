@@ -280,15 +280,16 @@ test('historikken: /tokens viser projektet, /tokens <nr> en opgave, og panelet o
   const panel = await $.ui.mount({ plugin: 'token-maaler', surface: 'desktop', component: 'Pane', requestId: 'token-maaler', props: panelProps } as never)
   expect(await panel.find({ key: 'projekt' })).toBeUndefined()
   await panel.press({ key: 'forbrug' })
-  // Forbrug: graferne øverst og projektets dyreste opgaver under dem.
+  // Forbrug: graferne øverst og ugens dyreste samtaler under dem.
   expect((await panel.find({ type: 'Text', text: /^Ugen pr\. dag$/ }))?.props.bold).toBe(true)
   // Uden målte grænser er der kun søjlerne for ugen; den seneste opgave vises ikke her.
   expect(await panel.findAll({ type: 'Svg' })).toHaveLength(1)
   expect(await panel.find({ type: 'Text', text: /Seneste opgave/ })).toBeUndefined()
-  expect(await panel.find({ type: 'Text', text: /hele projektet/ })).toBeDefined()
-  expect((await panel.find({ type: 'Text', text: /^█+$/ }))?.props.color).toBe('cyan')
+  // Forbrug gælder alle samtaler; her er der ingen i de seneste 7 dage.
+  expect(await panel.find({ type: 'Text', text: /^Intet forbrug de seneste 7 dage\.$/ })).toBeDefined()
   await panel.press({ key: 'dage' })
   expect(await panel.find({ type: 'Text', text: /2 aktive dage/ })).toBeDefined()
+  expect((await panel.find({ type: 'Text', text: /^█+$/ }))?.props.color).toBe('cyan')
   await panel.unmount()
 })
 
@@ -474,5 +475,37 @@ test('båndet viser 5-timersgrænsen og ugens grænse som målere: en graf på d
   await terminal.unmount()
 
   const tekst = (await $.command.run({ command: 'tokens', args: 'forbrug' } as never)).text ?? ''
-  expect(tekst.split('\n').slice(0, 4)).toEqual(['**Forbrug**', expect.stringMatching(/^5 t ██░+ 23 %/), '', '**Ugen pr. dag** · alle samtaler'])
+  expect(tekst.split('\n').slice(0, 4)).toEqual(['**Forbrug**', expect.stringMatching(/^5 t ██░+ 23 %/), '', '**Ugen pr. dag** · de seneste 7 dage · alle samtaler'])
+})
+
+test('Forbrug gælder alle samtaler: ugen pr. dag og ugens dyreste samtaler på tværs af projektmapper', async ($, on) => {
+  mock.clock(on, { now: Date.parse('2026-10-02T12:00:00.000Z') })
+  mock.store(on)
+  toMapper(on, new Set())
+  const linjer = ((await $.command.run({ command: 'tokens', args: 'forbrug' } as never)).text ?? '').split('\n')
+  const start = linjer.indexOf('**Ugens dyreste samtaler**')
+  expect(linjer[start - 2]).toMatch(/^I alt de seneste 7 dage: \d+,\d+ kr · 2 samtaler$/)
+  expect(linjer.slice(start + 1, start + 3)).toEqual([
+    expect.stringMatching(/^██████████ \d+,\d+ kr · Bæverspil$/),
+    expect.stringMatching(/^█░+ \d+,\d+ kr · Webshop-agent$/),
+  ])
+  // Søjlerne dækker de 7 dage frem til i dag; Bæverspillets dag (onsdag 1. oktober) har forbrug.
+  expect(linjer.filter(l => /^[█░]{10} /.test(l) && /(ons|tor|i dag)/.test(l)).length).toBeGreaterThan(0)
+})
+
+test('Forbrug følger ugens grænse: dagene siden den sidst blev nulstillet', async ($, on) => {
+  mock.clock(on, { now: Date.parse('2026-10-02T12:00:00.000Z') })
+  mock.store(on)
+  toMapper(on, new Set())
+  on('session.measure', async (_, e) => ({ changed: e.changed }))
+  // Ugen nulstilles 4. oktober kl. 10, så den startede søndag 27. september kl. 10 UTC: Webshop-agentens første dag er ude.
+  await $.session.measure({
+    context: { window: 1_000_000 },
+    rateLimits: [{ kind: 'seven_day', percentUsed: 8, resetsAt: '2026-10-04T10:00:00.000Z' }],
+    changed: ['rateLimits'],
+  } as never)
+  const linjer = ((await $.command.run({ command: 'tokens', args: 'forbrug' } as never)).text ?? '').split('\n')
+  expect(linjer[3]).toMatch(/^\*\*Ugen pr\. dag\*\* · siden søn kl\. \d\d:00 · alle samtaler$/)
+  expect(linjer.find(l => l.startsWith('I alt'))).toMatch(/^I alt siden søn kl\. \d\d:00: /)
+  expect(linjer.filter(l => /^[█░]{10} /.test(l))).toHaveLength(6 + 2)
 })
