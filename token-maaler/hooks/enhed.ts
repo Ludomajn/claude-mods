@@ -57,6 +57,15 @@ export const maalKr = (usd: number): string => {
 // Begge grænser og kroner, til én opgave: "12 % af 5 t · 2,1 % af ugen · 14 kr".
 export const opgaveMaal = (usd: number): string => [af5t(usd), afUgen(usd), kr(usd)].filter(Boolean).join(' · ')
 
+// Forbruget i en besked: begge grænser, når de er målt, ellers kroner.
+export const graenseForbrug = (usd: number): string => [af5t(usd), afUgen(usd)].filter(Boolean).join(' · ') || kr(usd)
+
+// "<1 min", "12 min", "1 t 5 min".
+export const minutter = (sekunder: number): string => {
+  const m = Math.round(sekunder / 60)
+  return sekunder < 60 ? '<1 min' : m < 60 ? `${m} min` : `${Math.floor(m / 60)} t${m % 60 ? ` ${m % 60} min` : ''}`
+}
+
 // Hvad tallene i rådene betyder.
 export const maalForklaring = (): string => (enhed.uge ? 'andel af ugens grænse' : 'kroner')
 

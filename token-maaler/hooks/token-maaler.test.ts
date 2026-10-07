@@ -93,7 +93,7 @@ test('en live-målt opgave vises i båndet og som besked', async ($, on) => {
   usd = 1.3
   await $.turn.complete({ answer: 'Færdig.', durationMs: 12_000, isAborted: false, turnId: 't1', reason: 'answer' } as never)
 
-  expect(toasts).toEqual([expect.stringMatching(/^Seneste opgave: 1,95 kr · mest: Read big\.ts \(\d+%\) · \/tokens$/)])
+  expect(toasts).toEqual([expect.stringMatching(/^Opgaven brugte 1,95 kr · (<1|\d+) min$/)])
 
   for (const surface of ['terminal', 'desktop'] as const) {
     const baand = await $.ui.mount({ plugin: 'token-maaler', surface, component: 'AbovePrompt', props: baandProps } as never)
@@ -299,7 +299,7 @@ const langTranscript = [
   ),
 ].join('\n')
 
-test('analytikeren giver et råd efter en opgave i en lang samtale og gentager det ikke', async ($, on) => {
+test('analytikeren finder et råd efter en opgave i en lang samtale og viser det i båndet, ikke som besked', async ($, on) => {
   const ur = mock.clock(on)
   mock.env(on, { HOME: '/h' })
   mock.store(on)
@@ -322,20 +322,19 @@ test('analytikeren giver et råd efter en opgave i en lang samtale og gentager d
     }
     await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId, reason: 'answer' } as never)
     await ur.advance(3_000)
-    // Analytikeren kører i en timer; giv den lidt tid til at blive færdig.
-    for (let i = 0; i < 50 && raadToasts().length === 0; i++) await vent(10)
+  }
+  const raadKnap = async () => {
+    const baand = await $.ui.mount({ plugin: 'token-maaler', surface: 'desktop', component: 'AbovePrompt', props: baandProps } as never)
+    const label = (await baand.find({ key: 'raad' }))?.props.label
+    await baand.unmount()
+    return label
   }
 
   await enOpgave('t1')
-  expect(raadToasts()).toEqual(['Råd: Lang samtale → /compact efter hver færdig opgave (ca. 4,39 kr at spare)'])
-
-  const baand = await $.ui.mount({ plugin: 'token-maaler', surface: 'desktop', component: 'AbovePrompt', props: baandProps } as never)
-  expect((await baand.find({ key: 'raad' }))?.props.label).toBe('Råd (1)')
-  await baand.unmount()
-
-  await enOpgave('t2')
-  await vent(200)
-  expect(raadToasts()).toHaveLength(1)
+  // Analytikeren kører i en timer; giv den lidt tid til at blive færdig.
+  for (let i = 0; i < 50 && (await raadKnap()) !== 'Råd (1)'; i++) await vent(10)
+  expect(await raadKnap()).toBe('Råd (1)')
+  expect(raadToasts()).toEqual([])
 
   const tekst = (await $.command.run({ command: 'tokens', args: 'råd' } as never)).text ?? ''
   expect(tekst).toContain('**Råd til at bruge færre tokens**')

@@ -1,6 +1,6 @@
 {
   "name": "token-maaler",
-  "version": "0.10.0",
+  "version": "0.10.1",
   "description": "Viser hvad projektet, hver opgave og hver dag kostede i tokens og penge, og giver råd til at bruge færre",
   "types": "./types/index.d.ts",
   "userConfig": {
@@ -19,7 +19,7 @@
     "beskeder": {
       "type": "boolean",
       "title": "Beskeder",
-      "description": "Vis en kort besked efter hver opgave, og når analytikeren har et nyt råd.",
+      "description": "Vis en kort besked efter hver opgave med forbruget og hvor lang tid den tog.",
       "default": true
     },
     "beskrivelser": {

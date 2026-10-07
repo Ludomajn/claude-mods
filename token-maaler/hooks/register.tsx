@@ -2,13 +2,13 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { KontekstDel } from '../types'
-import { afkort, analyser, etiket, kontekstDele, opsummering } from './analyse'
+import { afkort, analyser, etiket, fmt, kontekstDele, opsummering } from './analyse'
 import type { Agent, Kald, Trin } from './analyse'
 import { beskrivelsesPrompt, dagTekst, dageTekst, laesLinje, nySamling, opgaveTekst, projekt, projektTekst, renBeskrivelse, visteOpgaver } from './historik'
 import type { HistOpgave, Kilde, Projekt, Samling } from './historik'
 import { indsigtTekst } from './indsigt'
 import type { Resume } from './indsigt'
-import { KVARTER, median, saetEnhed, VINDUER } from './enhed'
+import { graenseForbrug, KVARTER, median, minutter, saetEnhed, VINDUER } from './enhed'
 import type { Maaling } from './enhed'
 import {
   ANALYSE_SYSTEM,
@@ -478,20 +478,13 @@ const promptsmartFor = (
   return promptsmartIgang
 }
 
-// Efter hver opgave: er der et nyt råd (eller er et gammelt blevet dobbelt så stort), vises det én gang.
+// Efter hver opgave regner analytikeren rådene igen; båndet viser, hvor mange der er.
 const tjekRaad = async ($: EngineInterface) => {
   try {
     const p = await hentProjekt($, '')
     if (typeof p === 'string') return
     const liste = await raadFor($, p)
     await update($, raadListe, () => liste.map(r => ({ id: r.id, titel: r.navn, usd: r.usd })))
-    const noegle = `raad-vist:${p.id}`
-    const gemt = await $.store.get(noegle)
-    const vist = (gemt !== null && typeof gemt === 'object' ? gemt : {}) as Record<string, number>
-    const nyt = liste.find(r => r.usd >= 0.5 && r.usd >= 2 * (vist[r.id] ?? 0))
-    if (!nyt || !indstillinger.beskeder) return
-    await $.store.set(noegle, { ...vist, [nyt.id]: nyt.usd })
-    $.ui.toast(`Råd: ${kortRaad(nyt)} (ca. ${beloeb(nyt.usd)} at spare)`, { timeoutMs: 10_000 })
   } catch {
     // Et råd må aldrig forstyrre arbejdet.
   }
@@ -770,7 +763,9 @@ export const register: Register = (on, options) => {
       const sidste = igang.trin.filter(t => t.loop === '').at(-1)
       if (sidste) forrigePrompt = sidste.input + sidste.cacheLaes + sidste.cacheSkriv
       await update($, opgaver, liste => [...liste, opgave].slice(-50))
-      if (indstillinger.beskeder) $.ui.toast(`Seneste opgave: ${opsummering(opgave)} · /tokens`)
+      if (indstillinger.beskeder) {
+        $.ui.toast(`Opgaven brugte ${opgave.usd !== null ? graenseForbrug(opgave.usd) : `${fmt(opgave.ind + opgave.ud)} tokens`} · ${minutter(opgave.sekunder)}`)
+      }
       // Analytikeren kigger på hele projektet lidt efter, når transcriptet er skrevet færdigt.
       $.clock.after(3_000, () => void tjekRaad($))
     } catch {
