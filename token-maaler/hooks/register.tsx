@@ -472,16 +472,14 @@ export const register: Register = on => {
             await aabnPanel($, '/tokens')
           }}
         />
-        {raadAntal > 0 && (
-          <Button
-            key="raad"
-            label={`Råd (${raadAntal})`}
-            onPress={async () => {
-              await visPanel($, 'raad', null)
-              await aabnPanel($, '/tokens råd')
-            }}
-          />
-        )}
+        <Button
+          key="raad"
+          label={raadAntal > 0 ? `Råd (${raadAntal})` : 'Råd'}
+          onPress={async () => {
+            await visPanel($, 'raad', null)
+            await aabnPanel($, '/tokens råd')
+          }}
+        />
         <Button key="skjul" label="Skjul" onPress={() => update($, skjult, () => true)} />
       </Box>
     )
