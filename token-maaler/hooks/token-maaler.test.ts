@@ -462,7 +462,7 @@ test('båndet viser 5-timersgrænsen og ugens grænse som målere: en graf på d
   const desktop = await $.ui.mount({ plugin: 'token-maaler', surface: 'desktop', component: 'AbovePrompt', props: baandProps } as never)
   // Hver måler: etiketten som tekst og en lille bjælke i fast størrelse med procenten på.
   const bjaelker = await desktop.findAll({ type: 'Svg' })
-  expect(bjaelker.map(b => [b.props.width, b.props.height, b.props.isInteractive])).toEqual([[72, 16, undefined], [72, 16, undefined]])
+  expect(bjaelker.map(b => [b.props.width, b.props.height, b.props.isInteractive])).toEqual([[72, 14, undefined], [72, 14, undefined]])
   expect(bjaelker.map(b => b.props.alt)).toEqual(['5 t 23 %', 'Uge 8 %'])
   expect(String(bjaelker[0]?.props.source)).toContain('>23 %</text>')
   expect(await desktop.find({ type: 'Text', text: /^23 %$/ })).toBeUndefined()

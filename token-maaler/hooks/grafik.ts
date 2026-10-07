@@ -71,12 +71,12 @@ export const bjaelkeSvg = (p: number): Tegning => {
   const w = Math.max(p > 0 ? 4 : 0, (Math.min(100, p) / 100) * 72)
   return svg(
     72,
-    16,
+    14,
     [
       // Et mørkere spor end i panelet, så den hvide procent kan læses på lys og mørk baggrund.
-      `<rect x="0" y="0" width="72" height="16" rx="8" fill="rgba(110,110,110,0.55)"/>`,
-      `<rect x="0" y="0" width="${w.toFixed(1)}" height="16" rx="8" fill="${fyld(p)}"/>`,
-      `<text x="36" y="12" text-anchor="middle" fill="#ffffff" stroke="rgba(0,0,0,0.45)" stroke-width="2" paint-order="stroke" font-size="11" font-weight="600" ${SKRIFT}>${pct(p)}</text>`,
+      `<rect x="0" y="0" width="72" height="14" rx="7" fill="rgba(110,110,110,0.55)"/>`,
+      `<rect x="0" y="0" width="${w.toFixed(1)}" height="14" rx="7" fill="${fyld(p)}"/>`,
+      `<text x="36" y="10.5" text-anchor="middle" fill="#ffffff" stroke="rgba(0,0,0,0.3)" stroke-width="1.5" paint-order="stroke" font-size="10" font-weight="500" ${SKRIFT}>${pct(p)}</text>`,
     ].join(''),
   )
 }
