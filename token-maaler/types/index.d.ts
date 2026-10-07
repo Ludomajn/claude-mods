@@ -42,17 +42,29 @@ export type Opgave = {
   kontekst: KontekstDel[]
 }
 
+// En abonnementsgrænse, som Claude Code melder den.
+export type Graense = { kind: string; percentUsed: number; resetsAt?: string }
+
+// Én søjle i et søjlediagram og én del af en stablet bjælke.
+export type Soejle = { etiket: string; vaerdi: number; tal: string; tooltip: string }
+export type Del = { navn: string; andel: number; tekst: string }
+
+// Det, Forbrug-visningen tegner ud over teksten.
+export type ForbrugGrafik = { dage: Soejle[]; fordeling: { titel: string; dele: Del[] } | null }
+
 declare module 'claude-code' {
   interface PluginState {
     'token-maaler': {
       opgaver: Opgave[]
       skjult: boolean
       velkomstSkjult: boolean
-      paneVisning: 'projekt' | 'opgave' | 'dage' | 'raad' | 'alle' | 'promptsmart'
+      paneVisning: 'projekt' | 'opgave' | 'dage' | 'raad' | 'alle' | 'promptsmart' | 'forbrug'
       paneNr: number | null
       paneAntal: number
       paneLinjer: string[]
       raad: { id: string; titel: string; usd: number }[]
+      graenser: Graense[]
+      forbrugGrafik: ForbrugGrafik | null
     }
   }
 }

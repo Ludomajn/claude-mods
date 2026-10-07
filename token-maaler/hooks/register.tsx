@@ -1,14 +1,24 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { KontekstDel } from '../types'
-import { afkort, analyser, etiket, fmt, kontekstDele, opsummering } from './analyse'
+import type { Del, ForbrugGrafik, Graense, KontekstDel, Soejle } from '../types'
+import { afkort, analyser, etiket, fmt, kontekstDele, opsummering, procent } from './analyse'
 import type { Agent, Kald, Trin } from './analyse'
-import { beskrivelsesPrompt, dagTekst, dageTekst, laesLinje, nySamling, opgaveTekst, projekt, projektTekst, renBeskrivelse, visteOpgaver } from './historik'
+import { beskrivelsesPrompt, dagTekst, dageTekst, datoNoegle, datoTekst, laesLinje, nySamling, opgaveTekst, projekt, projektTekst, renBeskrivelse, visteOpgaver } from './historik'
 import type { HistOpgave, Kilde, Projekt, Samling } from './historik'
 import { indsigtTekst } from './indsigt'
 import type { Resume } from './indsigt'
-import { graenseForbrug, KVARTER, median, minutter, saetEnhed, VINDUER } from './enhed'
+import { graenseForbrug, kr, KVARTER, maal, maalKr, median, minutter, opgaveMaal, saetEnhed, VINDUER } from './enhed'
+import {
+  fordelingSvg,
+  fordelingTekst,
+  maalerSvgLille,
+  maalerSvgStor,
+  maalerTekst,
+  soejlerSvg,
+  soejlerTekst,
+  vistGraenser,
+} from './grafik'
 import type { Maaling } from './enhed'
 import {
   ANALYSE_SYSTEM,
@@ -35,6 +45,8 @@ const paneAntal = atom({ plugin: 'token-maaler', key: 'paneAntal' } as const, 0)
 const paneLinjer = atom({ plugin: 'token-maaler', key: 'paneLinjer' } as const, [])
 const raadListe = atom({ plugin: 'token-maaler', key: 'raad' } as const, [])
 const velkomstSkjult = atom({ plugin: 'token-maaler', key: 'velkomstSkjult' } as const, false)
+const graenser = atom({ plugin: 'token-maaler', key: 'graenser' } as const, [])
+const forbrugGrafik = atom({ plugin: 'token-maaler', key: 'forbrugGrafik' } as const, null)
 
 const PANE = 'token-maaler'
 const HISTORIK_VAERKTOEJ = 'mcp__token-maaler__historik'
@@ -54,7 +66,6 @@ type Indstillinger = { velkomst: boolean; baand: boolean; beskeder: boolean; bes
 const KALIBRERING = 'kalibrering:v1'
 type Vindue = keyof typeof VINDUER
 type Kalibrering = Partial<Record<Vindue, Maaling[]>>
-type Graense = { kind: string; percentUsed: number; resetsAt?: string }
 let indstillinger: Indstillinger = { velkomst: true, baand: true, beskeder: true, beskrivelser: true, promptsmart: true }
 
 const HISTORIK_BESKRIVELSE =
@@ -72,7 +83,10 @@ type Igang = Spand & {
   kontekst: Promise<KontekstDel[]>
 }
 
-type Visning = 'projekt' | 'opgave' | 'dage' | 'raad' | 'alle' | 'promptsmart'
+type Visning = 'projekt' | 'opgave' | 'dage' | 'raad' | 'alle' | 'promptsmart' | 'forbrug'
+
+// Grænserne, som de sidst blev målt, så båndet kan vise dem fra starten af en ny samtale.
+const SIDSTE_GRAENSER = 'graenser:sidst'
 
 const forbrug = async ($: EngineInterface) => {
   try {
@@ -506,8 +520,86 @@ const tekstFor = async ($: EngineInterface, p: Projekt, visning: Visning | 'dag'
   return projektTekst(p, visuel, await beskriv($, p, visteOpgaver(p)), raadLinje)
 }
 
+// Forbruget pr. dag i de seneste 7 dage på tværs af alle samtaler, som ugens grænse tæller det.
+const ugensDage = async ($: EngineInterface): Promise<Soejle[]> => {
+  const egen = await $.session.id()
+  const pr = new Map<string, number>()
+  for (const s of await alleSessioner($)) {
+    const r = await resumeFor($, s, egen).catch(() => null)
+    for (const [n, usd] of Object.entries(r?.kvarterer ?? {})) {
+      const dato = datoNoegle(Number(n) * KVARTER)
+      pr.set(dato, (pr.get(dato) ?? 0) + usd)
+    }
+  }
+  const nu = await $.clock.now()
+  return Array.from({ length: 7 }, (_, i) => {
+    const dato = datoNoegle(nu - (6 - i) * 86_400_000)
+    const usd = pr.get(dato) ?? 0
+    const navn = datoTekst(dato)
+    return {
+      etiket: i === 6 ? 'i dag' : (navn.split(' ')[0] ?? ''),
+      vaerdi: usd,
+      tal: usd > 0 ? maal(usd) : '',
+      tooltip: `${navn}: ${usd > 0 ? maalKr(usd) : 'intet forbrug'}`,
+    }
+  })
+}
+
+// Hvad den seneste opgave brugte sit forbrug på: målt live, ellers fra transcriptet.
+const senesteFordeling = async ($: EngineInterface, p: Projekt | null): Promise<ForbrugGrafik['fordeling']> => {
+  const live = (await read($, opgaver)).at(-1)
+  const sidste = p?.opgaver.at(-1)
+  const o = live ?? (sidste ? analyser(sidste.raa) : null)
+  if (!o || o.poster.length === 0) return null
+  const top = o.poster.slice(0, 5)
+  const rest = o.poster.slice(5)
+  const del = (navn: string, andel: number, usd: number | null): Del => ({
+    navn: afkort(navn, 40),
+    andel,
+    tekst: `${procent(andel)}${usd !== null ? ` · ${kr(usd)}` : ''}`,
+  })
+  const dele = top.map(x => del(x.navn, x.andel, x.usd))
+  if (rest.length) {
+    dele.push(del('Resten', rest.reduce((s, x) => s + x.andel, 0), o.usd !== null ? rest.reduce((s, x) => s + (x.usd ?? 0), 0) : null))
+  }
+  return { titel: `"${afkort(o.prompt, 50)}"${o.usd !== null ? ` · ${opgaveMaal(o.usd)}` : ''}`, dele }
+}
+
+// Forbrug: grænserne, ugen pr. dag, den seneste opgave og projektets dyreste opgaver.
+const forbrugFor = async ($: EngineInterface): Promise<{ grafik: ForbrugGrafik; linjer: string[] }> => {
+  const p = await hentProjekt($, '')
+  const projekt = typeof p === 'string' ? null : p
+  const grafik: ForbrugGrafik = { dage: await ugensDage($).catch(() => []), fordeling: await senesteFordeling($, projekt) }
+  const linjer = projekt ? await tekstFor($, projekt, 'projekt', null, true) : [String(p)]
+  return { grafik, linjer }
+}
+
+// Forbrug som tekst, til terminalen og /tokens forbrug.
+const forbrugTekst = async ($: EngineInterface): Promise<string[]> => {
+  const { grafik, linjer } = await forbrugFor($)
+  const g = await read($, graenser)
+  const nu = await $.clock.now()
+  return [
+    '**Forbrug**',
+    vistGraenser(g).length ? maalerTekst(g, nu) : 'Grænserne vises, når Claude har svaret første gang.',
+    '',
+    '**Ugen pr. dag** · alle samtaler',
+    ...soejlerTekst(grafik.dage),
+    ...(grafik.fordeling ? ['', `**Seneste opgave** · ${grafik.fordeling.titel}`, ...fordelingTekst(grafik.fordeling.dele)] : []),
+    '',
+    ...linjer,
+  ]
+}
+
 // Panelet viser samme tekst som kommandoerne; den beregnes, når en knap trykkes.
 const visPanel = async ($: EngineInterface, visning: Visning, nr: number | null) => {
+  if (visning === 'forbrug') {
+    await update($, paneVisning, () => visning)
+    const { grafik, linjer } = await forbrugFor($)
+    await update($, forbrugGrafik, () => grafik)
+    await update($, paneLinjer, () => linjer)
+    return
+  }
   if (visning === 'promptsmart') {
     await update($, paneVisning, () => visning)
     const linjer = await promptsmartFor($, true, async l => {
@@ -644,6 +736,8 @@ export const register: Register = (on, options) => {
       // Uden plugin-værktøjer virker kommandoen stadig.
     }
     await indlaesEnhed($)
+    const gemte = await $.store.get(SIDSTE_GRAENSER)
+    if (Array.isArray(gemte)) await update($, graenser, () => gemte as Graense[])
     $.clock.after(20_000, () => void forvarm($))
     return next(e)
   })
@@ -651,8 +745,13 @@ export const register: Register = (on, options) => {
   // Når en grænse flytter sig, måles den igen lidt efter.
   on('session.measure', async ($, e, next) => {
     if (e.changed.includes('rateLimits')) {
-      const graenser = e.rateLimits.map(g => ({ ...g }))
-      $.clock.after(2_000, () => void kalibrer($, graenser))
+      const nye = e.rateLimits.map(g => ({ ...g }))
+      const vist = vistGraenser(nye)
+      if (vist.length) {
+        await update($, graenser, () => vist)
+        await $.store.set(SIDSTE_GRAENSER, vist)
+      }
+      $.clock.after(2_000, () => void kalibrer($, nye))
     }
     return next(e)
   })
@@ -778,6 +877,7 @@ export const register: Register = (on, options) => {
     const ord = e.args.trim().split(/\s+/).filter(Boolean)
     const [foerste = '', ...rest] = ord
     await update($, skjult, () => false)
+    if (foerste === 'forbrug') return { text: (await forbrugTekst($)).join('\n') }
     if (['prompts', 'promptsmart'].includes(foerste.toLowerCase())) return { text: (await promptsmartFor($, true)).join('\n') }
     if (((foerste === 'råd' || foerste === 'raad') && rest.join(' ') === 'alle') || foerste === 'indsigt') {
       return { text: (await indsigtFor($, true)).join('\n') }
@@ -805,13 +905,30 @@ export const register: Register = (on, options) => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
     const sidste = (await read($, opgaver)).at(-1)
-    const { Box, Button, Text } = $.ui.resolve(e)
+    const el = $.ui.resolve(e)
+    const { Box, Button, Text } = el
+    const g = await read($, graenser)
+    const nu = await $.clock.now()
+    // Målerne for 5-timersgrænsen og ugens grænse: en lille graf, i terminalen som tekst.
+    const maaler =
+      vistGraenser(g).length === 0 ? null : 'Svg' in el && e.surface !== 'terminal' ? (
+        <Box marginRight={2}>
+          <el.Svg source={maalerSvgLille(g, nu)} alt={maalerTekst(g, nu)} isInteractive />
+        </Box>
+      ) : (
+        <Text dimColor>{maalerTekst(g, nu)} · </Text>
+      )
+    const visForbrug = async () => {
+      await visPanel($, 'forbrug', null)
+      await aabnPanel($, '/tokens forbrug')
+    }
 
     // En ny samtale, før den første opgave er målt: en indgang til indsigten i hele forbruget.
     if (!sidste) {
       if (!indstillinger.velkomst || (await read($, velkomstSkjult))) return next(e)
       return (
-        <Box>
+        <Box alignItems="center">
+          {maaler}
           <Text dimColor>Bliv klogere på dit forbrug og dine prompts </Text>
           <Button key="indsigt" label="Indsigt" onPress={() => visIndsigt($)} />
           {indstillinger.promptsmart && <Button key="promptsmart" label="Dine prompts" onPress={() => visPromptsmart($)} />}
@@ -823,7 +940,8 @@ export const register: Register = (on, options) => {
     const raadAntal = (await read($, raadListe)).length
 
     return (
-      <Box>
+      <Box alignItems="center">
+        {maaler}
         <Text dimColor>Sidste opgave: {opsummering(sidste)} </Text>
         <Button
           key="detaljer"
@@ -834,14 +952,6 @@ export const register: Register = (on, options) => {
           }}
         />
         <Button
-          key="projekt"
-          label="Projekt"
-          onPress={async () => {
-            await visPanel($, 'projekt', null)
-            await aabnPanel($, '/tokens')
-          }}
-        />
-        <Button
           key="raad"
           label={raadAntal > 0 ? `Råd (${raadAntal})` : 'Råd'}
           onPress={async () => {
@@ -849,13 +959,15 @@ export const register: Register = (on, options) => {
             await aabnPanel($, '/tokens råd')
           }}
         />
+        <Button key="forbrug" label="Forbrug" onPress={visForbrug} />
         <Button key="skjul" label="Skjul" onPress={() => update($, skjult, () => true)} />
       </Box>
     )
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const { Box, Button, Text } = $.ui.resolve(e)
+    const el = $.ui.resolve(e)
+    const { Box, Button, Text } = el
     type Stil = { dimColor?: true; color?: string }
     // **fed** vises fed og `kode` i farve; resten i linjens egen stil.
     const dele = (tekst: string, stil: Stil) =>
@@ -889,12 +1001,49 @@ export const register: Register = (on, options) => {
     const nr = await read($, paneNr)
     const antal = await read($, paneAntal)
     const linjer = await read($, paneLinjer)
+    const grafik = await read($, forbrugGrafik)
+    const g = await read($, graenser)
+    const nu = await $.clock.now()
 
     return (
       <Box flexDirection="column" paddingX={1} paddingY={1}>
-        {(linjer.length ? linjer : ['Tryk Projekt for at hente forbruget.']).map(vis)}
+        {visning === 'forbrug' && grafik && (
+          <Box flexDirection="column" marginBottom={1}>
+            <Text bold>Forbrug</Text>
+            <Text dimColor>Dine grænser lige nu</Text>
+            {vistGraenser(g).length === 0 ? (
+              <Text dimColor>Grænserne vises, når Claude har svaret første gang.</Text>
+            ) : 'Svg' in el && e.surface !== 'terminal' ? (
+              <el.Svg source={maalerSvgStor(g, nu)} alt={maalerTekst(g, nu)} isInteractive />
+            ) : (
+              <Text>{maalerTekst(g, nu)}</Text>
+            )}
+            <Box marginTop={1}>
+              <Text bold>Ugen pr. dag</Text>
+              <Text dimColor> · alle samtaler</Text>
+            </Box>
+            {'Svg' in el && e.surface !== 'terminal' ? (
+              <el.Svg source={soejlerSvg(grafik.dage)} alt={soejlerTekst(grafik.dage).join('\n')} isInteractive />
+            ) : (
+              soejlerTekst(grafik.dage).map(l => <Text>{l}</Text>)
+            )}
+            {grafik.fordeling && (
+              <Box marginTop={1}>
+                <Text bold>Seneste opgave</Text>
+                <Text dimColor> · {grafik.fordeling.titel}</Text>
+              </Box>
+            )}
+            {grafik.fordeling &&
+              ('Svg' in el && e.surface !== 'terminal' ? (
+                <el.Svg source={fordelingSvg(grafik.fordeling.dele)} alt={fordelingTekst(grafik.fordeling.dele).join('\n')} isInteractive />
+              ) : (
+                fordelingTekst(grafik.fordeling.dele).map(l => <Text>{l}</Text>)
+              ))}
+          </Box>
+        )}
+        {(linjer.length ? linjer : ['Tryk Forbrug for at hente forbruget.']).map(vis)}
         <Box marginTop={1} gap={1}>
-          <Button key="projekt" label="Projekt" onPress={() => visPanel($, 'projekt', null)} />
+          <Button key="forbrug" label="Forbrug" onPress={() => visPanel($, 'forbrug', null)} />
           <Button key="dage" label="Dage" onPress={() => visPanel($, 'dage', null)} />
           <Button key="raad" label="Råd" onPress={() => visPanel($, 'raad', null)} />
           <Button key="indsigt" label="Indsigt" onPress={() => visPanel($, 'alle', null)} />

@@ -57,8 +57,8 @@ export const maalKr = (usd: number): string => {
 // Begge grænser og kroner, til én opgave: "12 % af 5 t · 2,1 % af ugen · 14 kr".
 export const opgaveMaal = (usd: number): string => [af5t(usd), afUgen(usd), kr(usd)].filter(Boolean).join(' · ')
 
-// Forbruget i en besked: begge grænser, når de er målt, ellers kroner.
-export const graenseForbrug = (usd: number): string => [af5t(usd), afUgen(usd)].filter(Boolean).join(' · ') || kr(usd)
+// Forbruget i beskeden efter en opgave: andel af 5-timersgrænsen, ellers kroner.
+export const graenseForbrug = (usd: number): string => af5t(usd) ?? kr(usd)
 
 // "<1 min", "12 min", "1 t 5 min".
 export const minutter = (sekunder: number): string => {

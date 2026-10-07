@@ -8,6 +8,7 @@ Viser, hvor meget af dine grænser (5 timer og ugen) projektet, hver opgave og h
 - `/tokens Kundekrigen` viser en anden session i samme projektmappe (en del af titlen er nok).
 - Efter hver opgave vises et bånd over prompten med knapperne **Detaljer** og **Projekt**.
 - Du kan også spørge Claude, fx "hvad kostede opgave 4?" eller "hvor mange dage har vi arbejdet på det her?".
+- **Forbrug** (knappen i båndet og panelet, eller `/tokens forbrug`) viser grænserne som målere, ugens forbrug pr. dag som søjler (alle samtaler), hvad den seneste opgave brugte sit forbrug på, og projektets dyreste opgaver. Graferne tegnes i desktop-appen; i terminalen står de som tekst.
 - `/tokens råd` viser analytikerens råd til at bruge færre tokens, hver med et skøn over, hvad det kunne have sparet. Båndet over prompten viser, hvor mange råd der er, på knappen **Råd**.
 - `/tokens råd alle` (eller knappen **Indsigt**) samler alle dine samtaler i alle projekter: forbruget i alt, rådene på tværs og de dyreste samtaler. I en ny samtale står "Bliv klogere på dit forbrug og dine prompts" over prompten med knapperne **Indsigt** og **Dine prompts**.
 - **Dine prompts** (knappen ved siden af Indsigt, `/tokens prompts` eller `/prompts`) finder steder, hvor din første prompt manglede noget, så du måtte rette bagefter, og foreslår, hvordan prompten kunne have lydt. Tre modeller deler arbejdet: Claude Opus analyserer dine 8 dyreste samtaler, Claude Sonnet skriver den bedre prompt på dit eget niveau (samme sprog og tone, højst halvanden gang så lang), og Claude Haiku skriver forklaringerne. Beløbet er, hvad rettelserne bagefter kostede. Forslagene gemmes, så en samtale kun gennemgås igen, når den har fået nye beskeder.
@@ -40,7 +41,7 @@ I Claude-appen kan du også installere den under **+** ved prompten → **Plugin
 Under `/config` står mod'ens indstillinger; alle er slået til fra start:
 
 - **Velkomst i nye samtaler**: "Bliv klogere på dit forbrug og dine prompts" med knapperne Indsigt og Dine prompts.
-- **Bånd efter hver opgave**: hvor meget af grænserne den seneste opgave brugte, over prompten.
+- **Bånd efter hver opgave**: målere for 5-timersgrænsen og ugens grænse, hvad den seneste opgave brugte, og knapperne Detaljer, Råd og Forbrug.
 - **Kroner pr. dollar**: kursen, listepriserne omregnes til kroner med (standard 6,5).
 - **Beskeder**: en kort besked efter hver opgave med forbruget og hvor lang tid den tog.
 - **Dine prompts**: knappen Dine prompts ved siden af Indsigt. Gennemgangen sender uddrag af dine samtaler til Opus, Sonnet og Haiku og koster typisk under 7 kr.

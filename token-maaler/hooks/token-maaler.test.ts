@@ -100,7 +100,8 @@ test('en live-målt opgave vises i båndet og som besked', async ($, on) => {
     expect((await baand.find({ type: 'Text', text: /Sidste opgave: .*mest: Read big\.ts/ }))?.type).toBe('Text')
     expect(await baand.find({ key: 'detaljer' })).toBeDefined()
     expect((await baand.find({ key: 'raad' }))?.props.label).toBe('Råd')
-    await baand.press({ key: 'projekt' })
+    expect(await baand.find({ key: 'projekt' })).toBeUndefined()
+    await baand.press({ key: 'forbrug' })
     await baand.unmount()
   }
   expect(aabnet).toEqual(['token-maaler', 'token-maaler'])
@@ -277,7 +278,11 @@ test('historikken: /tokens viser projektet, /tokens <nr> en opgave, og panelet o
   expect(svarAlt).toContain('2 aktive dage')
 
   const panel = await $.ui.mount({ plugin: 'token-maaler', surface: 'desktop', component: 'Pane', requestId: 'token-maaler', props: panelProps } as never)
-  await panel.press({ key: 'projekt' })
+  expect(await panel.find({ key: 'projekt' })).toBeUndefined()
+  await panel.press({ key: 'forbrug' })
+  // Forbrug: graferne øverst og projektets dyreste opgaver under dem.
+  expect((await panel.find({ type: 'Text', text: /^Ugen pr\. dag$/ }))?.props.bold).toBe(true)
+  expect((await panel.findAll({ type: 'Svg' })).length).toBeGreaterThanOrEqual(2)
   expect(await panel.find({ type: 'Text', text: /hele projektet/ })).toBeDefined()
   expect((await panel.find({ type: 'Text', text: /^█+$/ }))?.props.color).toBe('cyan')
   await panel.press({ key: 'dage' })
@@ -438,4 +443,34 @@ test('grænserne måles ud fra forbruget i deres vinduer, og så står tallene s
   // $0.675 sparet ÷ $0.082 pr. procentpoint ≈ 8,2 % af ugen.
   expect(linjer[5]).toBe('██████████ **8,2 % af ugen · Lang samtale** · 1 samtale')
   expect(linjer[1]).toMatch(/^2 samtaler · 3 aktive dage · \d+ % af ugen \(\d+,\d+ kr\) i alt$/)
+})
+
+test('båndet viser 5-timersgrænsen og ugens grænse som målere: en graf på desktop, tekst i terminalen', async ($, on) => {
+  mock.clock(on)
+  mock.store(on)
+  toMapper(on, new Set())
+  on('session.measure', async (_, e) => ({ changed: e.changed }))
+  on('ui.render', async () => ({ type: 'Box', props: {}, children: [] }) as never)
+  await $.session.measure({
+    context: { window: 1_000_000 },
+    rateLimits: [
+      { kind: 'five_hour', percentUsed: 23, resetsAt: '2099-01-01T15:40:00.000Z' },
+      { kind: 'seven_day', percentUsed: 8, resetsAt: '2099-01-03T09:00:00.000Z' },
+    ],
+    changed: ['rateLimits'],
+  } as never)
+
+  const desktop = await $.ui.mount({ plugin: 'token-maaler', surface: 'desktop', component: 'AbovePrompt', props: baandProps } as never)
+  const svg = await desktop.find({ type: 'Svg' })
+  expect(String(svg?.props.source)).toContain('<svg')
+  expect(String(svg?.props.alt)).toMatch(/^5 t ██░+ 23 % \(nulstilles .+\)  ·  Uge █░+ 8 % \(nulstilles .+\)$/)
+  await desktop.unmount()
+
+  const terminal = await $.ui.mount({ plugin: 'token-maaler', surface: 'terminal', component: 'AbovePrompt', props: baandProps } as never)
+  expect(await terminal.find({ type: 'Text', text: /^5 t ██░+ 23 %/ })).toBeDefined()
+  expect(await terminal.find({ type: 'Svg' })).toBeUndefined()
+  await terminal.unmount()
+
+  const tekst = (await $.command.run({ command: 'tokens', args: 'forbrug' } as never)).text ?? ''
+  expect(tekst.split('\n').slice(0, 4)).toEqual(['**Forbrug**', expect.stringMatching(/^5 t ██░+ 23 %/), '', '**Ugen pr. dag** · alle samtaler'])
 })
