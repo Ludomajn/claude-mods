@@ -65,14 +65,19 @@ const graenseTooltip = (g: Graense, nu: number) => {
   return `${NAVN[g.kind]?.lang ?? g.kind}: ${pct(brugt(g, nu))} brugt${n ? `, nulstilles ${n}` : ''}`
 }
 
-// Én lille bjælke til båndet. Etiket og procent står som almindelig tekst ved siden af, så de
-// flugter med båndets tekst og knapper.
+// Én lille bjælke til båndet med procenten skrevet på bjælken. Etiketten står som almindelig tekst
+// ved siden af, så den flugter med båndets tekst og knapper.
 export const bjaelkeSvg = (p: number): Tegning => {
-  const w = Math.max(p > 0 ? 3 : 0, (Math.min(100, p) / 100) * 56)
+  const w = Math.max(p > 0 ? 4 : 0, (Math.min(100, p) / 100) * 72)
   return svg(
-    56,
-    8,
-    `<rect x="0" y="0" width="56" height="8" rx="4" fill="${SPOR}"/><rect x="0" y="0" width="${w.toFixed(1)}" height="8" rx="4" fill="${fyld(p)}"/>`,
+    72,
+    16,
+    [
+      // Et mørkere spor end i panelet, så den hvide procent kan læses på lys og mørk baggrund.
+      `<rect x="0" y="0" width="72" height="16" rx="8" fill="rgba(110,110,110,0.55)"/>`,
+      `<rect x="0" y="0" width="${w.toFixed(1)}" height="16" rx="8" fill="${fyld(p)}"/>`,
+      `<text x="36" y="12" text-anchor="middle" fill="#ffffff" stroke="rgba(0,0,0,0.45)" stroke-width="2" paint-order="stroke" font-size="11" font-weight="600" ${SKRIFT}>${pct(p)}</text>`,
+    ].join(''),
   )
 }
 

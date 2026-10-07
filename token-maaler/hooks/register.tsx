@@ -884,8 +884,8 @@ export const register: Register = (on, options) => {
     const { Box, Button, Text } = el
     const g = await read($, graenser)
     const nu = await $.clock.now()
-    // Målerne for 5-timersgrænsen og ugens grænse efter knapperne: etiket og procent som tekst og en
-    // lille bjælke imellem, så alt flugter med knapperne. I terminalen er bjælken tegn.
+    // Målerne for 5-timersgrænsen og ugens grænse efter knapperne: etiketten som tekst og en lille
+    // bjælke med procenten på. I terminalen er bjælken tegn.
     const vist = vistGraenser(g)
     const maaler =
       vist.length === 0 ? null : 'Svg' in el && e.surface !== 'terminal' ? (
@@ -894,7 +894,6 @@ export const register: Register = (on, options) => {
             <Box key={x.kind} alignItems="center" gap={1}>
               <Text dimColor>{kortNavn(x)}</Text>
               <el.Svg {...bjaelkeSvg(brugt(x, nu))} alt={`${kortNavn(x)} ${procentTekst(brugt(x, nu))}`} />
-              <Text dimColor>{procentTekst(brugt(x, nu))}</Text>
             </Box>
           ))}
         </Box>
