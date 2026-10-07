@@ -365,7 +365,7 @@ const spoerg = async ($: EngineInterface, rolle: Rolle, system: string, prompt: 
 // Et modelkald uden svar; samtalen gemmes så ikke, og grunden vises under resultatet.
 class ModelFejl extends Error {}
 
-type Fremgang = { samtaler: number; analyseret: number; skrevet: number }
+type Fremgang = { samtaler: number; analyseret: number; skrevet: number; klargjort: number }
 
 // Én samtale gennem alle tre modeller. Forslagene gemmes, til samtalen får nye beskeder.
 const promptsmartSamtale = async ($: EngineInterface, p: Projekt, fremgang: Fremgang, vis: () => Promise<void>): Promise<PromptRaad[]> => {
@@ -374,6 +374,7 @@ const promptsmartSamtale = async ($: EngineInterface, p: Projekt, fremgang: Frem
   const gemt = (await $.store.get(noegle)) as { signatur?: unknown; raad?: PromptRaad[] } | undefined
   if (gemt?.signatur === signatur && Array.isArray(gemt.raad)) {
     fremgang.analyseret += 1
+    fremgang.klargjort += 1
     await vis()
     return gemt.raad
   }
@@ -409,6 +410,8 @@ const promptsmartSamtale = async ($: EngineInterface, p: Projekt, fremgang: Frem
     proev,
     usd: p.opgaver.filter(o => k.rettelser.includes(o.nr)).reduce((n, o) => n + o.usd, 0),
   }))
+  fremgang.klargjort += 1
+  await vis()
   // Kun en hel gennemgang gemmes; manglede en prompt eller en forklaring, prøves samtalen igen næste gang.
   if (brugbare.length === kaeder.length && punkter.every(Boolean)) await $.store.set(noegle, { signatur, raad })
   return raad
@@ -431,13 +434,13 @@ const promptsmartFor = (
         if (r && r.usd > 0) resumeer.push({ s, usd: r.usd })
       }
       const valgte = resumeer.sort((a, b) => b.usd - a.usd).slice(0, PROMPTSMART_SAMTALER)
-      const fremgang: Fremgang = { samtaler: valgte.length, analyseret: 0, skrevet: 0 }
+      const fremgang: Fremgang = { samtaler: valgte.length, analyseret: 0, skrevet: 0, klargjort: 0 }
       const visFremgang = () =>
         vis([
           '**PromptSMART**',
-          `Opus analyserer: ${fremgang.analyseret} af ${fremgang.samtaler} samtaler`,
-          `Sonnet skriver bedre prompts: ${fremgang.skrevet} skrevet`,
-          'Haiku skriver forklaringerne til sidst.',
+          `Analyserer: ${fremgang.analyseret} af ${fremgang.samtaler} samtaler`,
+          `Forbedrer: ${fremgang.skrevet === 1 ? '1 prompt' : `${fremgang.skrevet} prompts`}`,
+          `Klargør: ${fremgang.klargjort} af ${fremgang.samtaler} samtaler`,
         ])
       await visFremgang()
       const fejl: string[] = []
