@@ -1,4 +1,4 @@
-import { afkort, afkortOrd, bjaelke, dollar } from './analyse'
+import { afkort, afkortOrd, bjaelke } from './analyse'
 import type { HistOpgave } from './historik'
 import { beloeb, MEST } from './raad'
 
@@ -7,13 +7,6 @@ import { beloeb, MEST } from './raad'
 // den bedre prompt, og Haiku skriver det, brugeren læser.
 export const MODEL = { analyse: 'opus', arbejde: 'sonnet', kommunikation: 'haiku' } as const
 export type Rolle = keyof typeof MODEL
-
-// Listepriserne, udgiften regnes med; aliasserne ovenfor peger på de nyeste modeller.
-export const PRISMODEL: Record<Rolle, string> = {
-  analyse: 'claude-opus-5-5',
-  arbejde: 'claude-sonnet-5-5',
-  kommunikation: 'claude-haiku-4-5',
-}
 
 // Én kæde: den første besked om en opgave og de senere beskeder, der rettede den.
 export type Kaede = { start: number; rettelser: number[]; oenske: string; manglede: string }
@@ -123,17 +116,16 @@ export const punkterFra = (svar: string, antal: number): ({ navn: string; mangle
   })
 }
 
-// Den bedre prompt uden anførselstegn og indledning.
+// Den bedre prompt på én linje uden anførselstegn og indledning.
 export const renPrompt = (svar: string): string =>
   svar
+    .replace(/\s+/g, ' ')
     .trim()
     .replace(/^(ny besked|bedre prompt|prøv)\s*:\s*/i, '')
     .replace(/^["'«»“”]+|["'«»“”]+$/g, '')
     .trim()
 
-export type Udgift = Record<Rolle, number>
-
-export const promptsmartTekst = (liste: readonly PromptRaad[], samtaler: number, udgift: Udgift, visuel = true): string[] => {
+export const promptsmartTekst = (liste: readonly PromptRaad[], samtaler: number, visuel = true): string[] => {
   const ud = ['**PromptSMART**', 'Prompts, der kunne have ramt første gang · beløb = hvad rettelserne bagefter kostede']
   const vist = [...liste].sort((a, b) => b.usd - a.usd).slice(0, MEST)
   const stoerst = vist[0]?.usd ?? 0
@@ -143,13 +135,9 @@ export const promptsmartTekst = (liste: readonly PromptRaad[], samtaler: number,
       '',
       `${visuel ? `${bjaelke(stoerst > 0 ? r.usd / stoerst : 0, 10)} ` : ''}**${beloeb(r.usd)} · ${r.navn}** · ${afkortOrd(r.samtale, 28)}`,
       `Du skrev: «${afkortOrd(r.skrev, 110)}» Det manglede: ${r.manglede}.`,
-      `→ Prøv: «${r.proev}»`,
+      `→ Prøv: «${renPrompt(r.proev)}»`,
     )
   }
-  const i = (n: number) => dollar(n)
-  ud.push(
-    '',
-    `Gennemgik ${samtaler === 1 ? '1 samtale' : `dine ${samtaler} dyreste samtaler`}. Denne gennemgang kostede ${i(udgift.analyse + udgift.arbejde + udgift.kommunikation)}: Opus ${i(udgift.analyse)} · Sonnet ${i(udgift.arbejde)} · Haiku ${i(udgift.kommunikation)}.`,
-  )
+  ud.push('', `Gennemgik ${samtaler === 1 ? '1 samtale' : `dine ${samtaler} dyreste samtaler`}.`)
   return ud
 }

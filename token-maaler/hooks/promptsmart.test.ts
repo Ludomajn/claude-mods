@@ -16,6 +16,7 @@ describe('PromptSMART', () => {
   test('Haikus punkter falder tilbage, når et mangler, og prompten renses', () => {
     expect(punkterFra('{"punkter": [{"navn": "Banner", "manglede": "placering."}]}', 2)).toEqual([{ navn: 'Banner', manglede: 'placering' }, null])
     expect(renPrompt('Bedre prompt: "Lav et banner i bunden"')).toBe('Lav et banner i bunden')
+    expect(renPrompt('Lav et banner.\n\nGerne i bunden.')).toBe('Lav et banner. Gerne i bunden.')
     expect(loft('x'.repeat(100))).toBe(250)
     expect(loft('x'.repeat(600))).toBe(900)
   })

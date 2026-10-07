@@ -358,7 +358,7 @@ test('PromptSMART: Opus finder rettelserne, Sonnet skriver prompten, Haiku forkl
           ? '```json\n{"kaeder": [{"start": 1, "rettelser": [2, 9], "oenske": "En forside med kontaktside", "manglede": "kontaktsiden"}]}\n```'
           : '{"kaeder": []}'
         : e.model === 'sonnet'
-          ? '«Byg forsiden og en kontaktside med formular»'
+          ? '«Byg forsiden og en kontaktside\n\nmed formular»'
           : '{"punkter": [{"navn": "Forside med kontakt", "manglede": "at kontaktsiden hørte med."}]}'
     return { value: { isAnswered: true, text: svar, usage } as never }
   })
@@ -372,8 +372,7 @@ test('PromptSMART: Opus finder rettelserne, Sonnet skriver prompten, Haiku forkl
     'Du skrev: «Byg forsiden» Det manglede: at kontaktsiden hørte med.',
     '→ Prøv: «Byg forsiden og en kontaktside med formular»',
     '',
-    // Opus: 2 × (10k × 4 + 1k × 20) $/M; Sonnet: 10k × 2 + 1k × 10; Haiku: 10k × 1 + 1k × 5.
-    'Gennemgik dine 2 dyreste samtaler. Denne gennemgang kostede $0.16: Opus $0.12 · Sonnet $0.030 · Haiku $0.015.',
+    'Gennemgik dine 2 dyreste samtaler.',
   ])
   expect(kaldt.sort()).toEqual(['haiku:low', 'opus:high', 'opus:high', 'sonnet:medium'])
 

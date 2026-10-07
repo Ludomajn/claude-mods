@@ -4,8 +4,8 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { KontekstDel } from '../types'
 import { afkort, analyser, etiket, kontekstDele, opsummering } from './analyse'
 import type { Agent, Kald, Trin } from './analyse'
-import { beskrivelsesPrompt, dagTekst, dageTekst, kaldUsd, laesLinje, nySamling, opgaveTekst, projekt, projektTekst, renBeskrivelse, visteOpgaver } from './historik'
-import type { Brug, HistOpgave, Kilde, Projekt, Samling } from './historik'
+import { beskrivelsesPrompt, dagTekst, dageTekst, laesLinje, nySamling, opgaveTekst, projekt, projektTekst, renBeskrivelse, visteOpgaver } from './historik'
+import type { HistOpgave, Kilde, Projekt, Samling } from './historik'
 import { indsigtTekst } from './indsigt'
 import type { Resume } from './indsigt'
 import {
@@ -17,12 +17,11 @@ import {
   KOMMUNIKATION_SYSTEM,
   kommunikationPrompt,
   MODEL,
-  PRISMODEL,
   promptsmartTekst,
   punkterFra,
   renPrompt,
 } from './promptsmart'
-import type { PromptRaad, Rolle, Udgift } from './promptsmart'
+import type { PromptRaad, Rolle } from './promptsmart'
 import { beloeb, kortRaad, overheadFra, raad, raadTekst, REGLER } from './raad'
 import type { Grundlag, Overhead, Raad } from './raad'
 
@@ -351,15 +350,14 @@ const indsigtFor = async ($: EngineInterface, visuel: boolean): Promise<string[]
   }
 }
 
-// Ét modelkald i PromptSMART; prisen lægges til `udgift` under modellens rolle.
-const spoerg = async ($: EngineInterface, rolle: Rolle, udgift: Udgift, system: string, prompt: string): Promise<string> => {
+// Ét modelkald i PromptSMART med den model og effort, rollen har.
+const spoerg = async ($: EngineInterface, rolle: Rolle, system: string, prompt: string): Promise<string> => {
   const indstilling = {
     analyse: { effort: 'high', maxTokens: 8_000, timeoutMs: 240_000 },
     arbejde: { effort: 'medium', maxTokens: 2_000, timeoutMs: 120_000 },
     kommunikation: { effort: 'low', maxTokens: 800, timeoutMs: 60_000 },
   } as const
   const svar = await $.model.complete({ model: MODEL[rolle], system, prompt, ...indstilling[rolle] })
-  udgift[rolle] += kaldUsd(PRISMODEL[rolle], (svar.usage ?? {}) as Brug)
   if (svar.isAnswered) return svar.text
   throw new ModelFejl(`${MODEL[rolle]}: ${svar.reason === 'api-error' ? `${svar.error ?? 'API-fejl'}` : svar.reason}`)
 }
@@ -370,7 +368,7 @@ class ModelFejl extends Error {}
 type Fremgang = { samtaler: number; analyseret: number; skrevet: number }
 
 // Én samtale gennem alle tre modeller. Forslagene gemmes, til samtalen får nye beskeder.
-const promptsmartSamtale = async ($: EngineInterface, p: Projekt, udgift: Udgift, fremgang: Fremgang, vis: () => Promise<void>): Promise<PromptRaad[]> => {
+const promptsmartSamtale = async ($: EngineInterface, p: Projekt, fremgang: Fremgang, vis: () => Promise<void>): Promise<PromptRaad[]> => {
   const noegle = `${PROMPTSMART}${p.id}`
   const signatur = `${p.opgaver.length}:${p.opgaver.at(-1)?.t ?? 0}`
   const gemt = (await $.store.get(noegle)) as { signatur?: unknown; raad?: PromptRaad[] } | undefined
@@ -380,14 +378,14 @@ const promptsmartSamtale = async ($: EngineInterface, p: Projekt, udgift: Udgift
     return gemt.raad
   }
   const titel = p.titel || p.opgaver[0]?.tekst || 'Uden titel'
-  const kaeder = kaederFra(await spoerg($, 'analyse', udgift, ANALYSE_SYSTEM, analysePrompt(titel, p.opgaver)), p.opgaver)
+  const kaeder = kaederFra(await spoerg($, 'analyse', ANALYSE_SYSTEM, analysePrompt(titel, p.opgaver)), p.opgaver)
   fremgang.analyseret += 1
   await vis()
   const fuld = (nr: number) => p.opgaver.find(o => o.nr === nr)?.fuld ?? ''
   const forslag = await Promise.all(
     kaeder.map(async k => {
       const proev = renPrompt(
-        await spoerg($, 'arbejde', udgift, ARBEJDE_SYSTEM, arbejdePrompt(fuld(k.start), k.rettelser.map(fuld), k)).catch(() => ''),
+        await spoerg($, 'arbejde', ARBEJDE_SYSTEM, arbejdePrompt(fuld(k.start), k.rettelser.map(fuld), k)).catch(() => ''),
       )
       fremgang.skrevet += 1
       await vis()
@@ -397,7 +395,7 @@ const promptsmartSamtale = async ($: EngineInterface, p: Projekt, udgift: Udgift
   const brugbare = forslag.filter(f => f.proev !== '')
   const punkter = brugbare.length
     ? punkterFra(
-        await spoerg($, 'kommunikation', udgift, KOMMUNIKATION_SYSTEM, kommunikationPrompt(brugbare.map(f => ({ foerste: fuld(f.k.start), manglede: f.k.manglede })))).catch(
+        await spoerg($, 'kommunikation', KOMMUNIKATION_SYSTEM, kommunikationPrompt(brugbare.map(f => ({ foerste: fuld(f.k.start), manglede: f.k.manglede })))).catch(
           () => '',
         ),
         brugbare.length,
@@ -433,7 +431,6 @@ const promptsmartFor = (
         if (r && r.usd > 0) resumeer.push({ s, usd: r.usd })
       }
       const valgte = resumeer.sort((a, b) => b.usd - a.usd).slice(0, PROMPTSMART_SAMTALER)
-      const udgift: Udgift = { analyse: 0, arbejde: 0, kommunikation: 0 }
       const fremgang: Fremgang = { samtaler: valgte.length, analyseret: 0, skrevet: 0 }
       const visFremgang = () =>
         vis([
@@ -450,7 +447,7 @@ const promptsmartFor = (
             const p = await laesSession($, s.mappe, s.id, s.id === egen)
             if (!p) return []
             const titel = p.titel || (await titelFra($, s.mappe, s.id))
-            return await promptsmartSamtale($, { ...p, titel }, udgift, fremgang, visFremgang)
+            return await promptsmartSamtale($, { ...p, titel }, fremgang, visFremgang)
           } catch (f) {
             fejl.push(f instanceof Error ? f.message : String(f))
             return []
@@ -458,7 +455,7 @@ const promptsmartFor = (
         }),
       )
       if (fejl.length === valgte.length && fejl.length > 0) return [`PromptSMART fik ikke svar fra modellerne (${fejl[0]}). Prøv igen om lidt.`]
-      const linjer = promptsmartTekst(alle.flat(), valgte.length - fejl.length, udgift, visuel)
+      const linjer = promptsmartTekst(alle.flat(), valgte.length - fejl.length, visuel)
       return fejl.length ? [...linjer, `${fejl.length === 1 ? '1 samtale' : `${fejl.length} samtaler`} kunne ikke gennemgås (${fejl[0]}).`] : linjer
     } catch (fejl) {
       return [`PromptSMART kunne ikke gennemgå samtalerne: ${fejl instanceof Error ? fejl.message : String(fejl)}`]
@@ -818,7 +815,7 @@ export const register: Register = (on, options) => {
         )
     // En bjælke står i farve. Under en overskrift er forklaringen dæmpet, og handlingen (→) er grøn.
     const vis = (linje: string, i: number, alle: readonly string[]) => {
-      const [, fyldt = '', tom = '', rest = ''] = /^(█*)(░*)(.*)$/.exec(linje) ?? []
+      const [, fyldt = '', tom = '', rest = ''] = /^(█*)(░*)(.*)$/.exec(linje.replace(/\s*\n\s*/g, ' ')) ?? []
       const forrige = alle[i - 1] ?? ''
       const underOverskrift = fyldt === '' && tom === '' && /^(█*░*\s?)\*\*/.test(forrige) && !rest.startsWith('**')
       const stil: Stil = rest.startsWith('→') ? { color: 'green' } : underOverskrift ? { dimColor: true } : {}
