@@ -111,7 +111,7 @@ test('en ny samtale viser velkomsten med Indsigt, til Skjul trykkes', async ($, 
   on('ui.render', async () => ({ type: 'Box', props: {}, children: [] }) as never)
   const baand = await $.ui.mount({ plugin: 'token-maaler', surface: 'desktop', component: 'AbovePrompt', props: baandProps } as never)
   expect(await baand.find({ text: /Sidste opgave/ })).toBeUndefined()
-  expect(await baand.find({ type: 'Text', text: /^Bliv klogere på dit Claude forbrug/ })).toBeDefined()
+  expect(await baand.find({ type: 'Text', text: /^Bliv klogere på dit forbrug og dine prompts/ })).toBeDefined()
   expect((await baand.find({ key: 'indsigt' }))?.props.label).toBe('Indsigt')
   await baand.press({ key: 'skjul' })
   expect(await baand.find({ type: 'Text', text: /Bliv klogere/ })).toBeUndefined()

@@ -754,7 +754,7 @@ export const register: Register = (on, options) => {
       if (!indstillinger.velkomst || (await read($, velkomstSkjult))) return next(e)
       return (
         <Box>
-          <Text dimColor>Bliv klogere på dit Claude forbrug </Text>
+          <Text dimColor>Bliv klogere på dit forbrug og dine prompts </Text>
           <Button key="indsigt" label="Indsigt" onPress={() => visIndsigt($)} />
           {indstillinger.promptsmart && <Button key="promptsmart" label="PromptSMART" onPress={() => visPromptsmart($)} />}
           <Button key="skjul" label="Skjul" onPress={() => update($, velkomstSkjult, () => true)} />

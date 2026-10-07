@@ -1,13 +1,13 @@
 {
   "name": "token-maaler",
-  "version": "0.9.1",
+  "version": "0.9.2",
   "description": "Viser hvad projektet, hver opgave og hver dag kostede i tokens og penge, og giver råd til at bruge færre",
   "types": "./types/index.d.ts",
   "userConfig": {
     "velkomst": {
       "type": "boolean",
       "title": "Velkomst i nye samtaler",
-      "description": "Vis \"Bliv klogere på dit Claude forbrug\" med knappen Indsigt, indtil den første opgave er færdig.",
+      "description": "Vis \"Bliv klogere på dit forbrug og dine prompts\" med knapperne Indsigt og PromptSMART, indtil den første opgave er færdig.",
       "default": true
     },
     "baand": {

@@ -9,7 +9,7 @@ Viser, hvad projektet, hver opgave og hver dag kostede i tokens og dollars, og h
 - Efter hver opgave vises et bånd over prompten med knapperne **Detaljer** og **Projekt**.
 - Du kan også spørge Claude, fx "hvad kostede opgave 4?" eller "hvor mange dage har vi arbejdet på det her?".
 - `/tokens råd` viser analytikerens råd til at bruge færre tokens, hver med et skøn over, hvad det kunne have sparet. Efter en opgave får du en besked, når der er et nyt råd, og båndet får knappen **Råd**.
-- `/tokens råd alle` (eller knappen **Indsigt**) samler alle dine samtaler i alle projekter: forbruget i alt, rådene på tværs og de dyreste samtaler. I en ny samtale står "Bliv klogere på dit Claude forbrug" over prompten med knappen **Indsigt**.
+- `/tokens råd alle` (eller knappen **Indsigt**) samler alle dine samtaler i alle projekter: forbruget i alt, rådene på tværs og de dyreste samtaler. I en ny samtale står "Bliv klogere på dit forbrug og dine prompts" over prompten med knapperne **Indsigt** og **PromptSMART**.
 - **PromptSMART** (knappen ved siden af Indsigt, `/tokens promptsmart` eller `/promptsmart`) finder steder, hvor din første prompt manglede noget, så du måtte rette bagefter, og foreslår, hvordan prompten kunne have lydt. Tre modeller deler arbejdet: Claude Opus analyserer dine 8 dyreste samtaler, Claude Sonnet skriver den bedre prompt på dit eget niveau (samme sprog og tone, højst halvanden gang så lang), og Claude Haiku skriver forklaringerne. Beløbet er, hvad rettelserne bagefter kostede. Forslagene gemmes, så en samtale kun gennemgås igen, når den har fået nye beskeder.
 - Hvert råd står på højst tre linjer: hvad det kunne have sparet, hvad analytikeren så, og hvad du kan gøre.
 
@@ -39,7 +39,7 @@ I Claude-appen kan du også installere den under **+** ved prompten → **Plugin
 
 Under `/config` står mod'ens indstillinger; alle er slået til fra start:
 
-- **Velkomst i nye samtaler**: "Bliv klogere på dit Claude forbrug" med knappen Indsigt.
+- **Velkomst i nye samtaler**: "Bliv klogere på dit forbrug og dine prompts" med knapperne Indsigt og PromptSMART.
 - **Bånd efter hver opgave**: prisen på den seneste opgave over prompten.
 - **Beskeder**: en kort besked efter hver opgave og ved nye råd.
 - **PromptSMART**: knappen PromptSMART ved siden af Indsigt. Gennemgangen sender uddrag af dine samtaler til Opus, Sonnet og Haiku og koster typisk under $1.
