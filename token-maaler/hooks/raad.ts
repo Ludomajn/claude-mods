@@ -2,11 +2,10 @@ import type { Opgave, PostType } from '../types'
 import { bjaelke, dollar, fmt, pris, procent } from './analyse'
 import type { HistOpgave, Projekt } from './historik'
 
-// Ét råd fra analytikeren: hvad den så, hvad man kan gøre, og hvad det cirka kunne have sparet.
+// Ét råd fra analytikeren: hvad den så (kort), hvad man gør, og hvad det cirka kunne have sparet.
 export type Raad = {
   id: string
   titel: string
-  tekst: string
   skridt: string
   usd: number
   eksempler: string[]
@@ -54,9 +53,8 @@ const langSamtale: Regel = {
     return [
       {
         id: 'lang-samtale',
-        titel: `Lang samtale: hver runde læser op til ${fmt(stoerst)} tokens igen`,
-        tekst: `I ${lange.length === 1 ? '1 opgave' : `${lange.length} opgaver`} var samtalen over 150k tokens lang, og den blev læst igen i hver runde. Komprimeret til ca. 60k havde det kostet ca. ${dollar(usd)} mindre.`,
-        skridt: 'Skriv /compact, når en opgave er færdig og samtalen er lang, og start en ny session til et nyt emne.',
+        titel: `Lang samtale (${fmt(stoerst)} tokens)`,
+        skridt: '/compact efter hver færdig opgave',
         usd,
         eksempler: flest(lange, x => x.usd).map(x => `opgave ${x.o.nr}: ${fmt(x.a.startKontekst)} tokens × ${x.a.runder} runder (ca. ${dollar(x.usd)} at spare)`),
       },
@@ -71,15 +69,13 @@ const pauser: Regel = {
       .map(({ o, a }) => ({ o, a, posten: a.poster.find(p => p.type === 'cache') }))
       .filter(x => x.posten !== undefined)
       .map(x => ({ ...x, kostede: x.posten?.usd ?? 0, tokens: x.posten?.tokens ?? 0 }))
-    const kostede = sum(ramte, x => x.kostede)
     const usd = sum(ramte, x => x.kostede * sparet(x.tokens))
     if (usd < MINDST) return []
     return [
       {
         id: 'pauser',
-        titel: `Pauser kostede ${dollar(kostede)} i genopbygning af cachen`,
-        tekst: `${ramte.length === 1 ? 'Én gang' : `${ramte.length} gange`} skulle hele samtalen skrives til cachen igen efter en pause (cachen holder ca. en time). Med en komprimeret samtale havde det kostet ca. ${dollar(usd)} mindre.`,
-        skridt: 'Skriv /compact, før du holder en lang pause, eller start en ny session, når du vender tilbage.',
+        titel: `Pauser (cachen udløb ${ramte.length === 1 ? '1 gang' : `${ramte.length} gange`})`,
+        skridt: '/compact før en pause',
         usd,
         eksempler: flest(ramte, x => x.kostede).map(x => `opgave ${x.o.nr}: ${fmt(x.tokens)} tokens skrevet igen (${dollar(x.kostede)})`),
       },
@@ -100,9 +96,8 @@ const storeResultater: Regel = {
     return [
       {
         id: 'store-resultater',
-        titel: `Store værktøjsresultater kostede ${dollar(kostede)}`,
-        tekst: `${store.length === 1 ? 'Ét værktøjskald' : `${store.length} værktøjskald`} gav over 5k tokens, som derefter blev læst igen i de følgende runder. Udsnit i stedet for hele filer og lange output kunne have sparet ca. ${dollar(usd)}.`,
-        skridt: 'Bed Claude læse bestemte linjer i store filer, søge med Grep og begrænse lange kommando-output.',
+        titel: `Store værktøjsresultater (${store.length} kald)`,
+        skridt: 'bed om udsnit, ikke hele filer',
         usd,
         eksempler: flest(store, x => x.usd).map(x => `opgave ${x.o.nr}: ${x.p.navn} (${fmt(x.p.tokens)}, ${dollar(x.usd)})`),
       },
@@ -121,9 +116,8 @@ const taenkning: Regel = {
     return [
       {
         id: 'taenkning',
-        titel: `Tænkning stod for ${procent(kostede / g.projekt.usd)} af prisen`,
-        tekst: `Claude tænkte for ${dollar(kostede)} i projektet. Rutineopgaver (commit, små rettelser, korte spørgsmål) kræver sjældent dyb tænkning; lavere effort på dem kunne spare ca. ${dollar(usd)}.`,
-        skridt: 'Sæt effort lavere i modelvælgeren til rutineopgaver, og hæv den igen til svære opgaver.',
+        titel: `Tænkning (${procent(kostede / g.projekt.usd)} af prisen)`,
+        skridt: 'lavere effort til rutineopgaver',
         usd,
         eksempler: flest(pr, x => x.usd).map(x => `opgave ${x.o.nr}: tænkning for ${dollar(x.usd)}`),
       },
@@ -141,9 +135,8 @@ const subagenter: Regel = {
     return [
       {
         id: 'subagenter',
-        titel: `Subagenter kostede ${dollar(kostede)} (${procent(kostede / g.projekt.usd)})`,
-        tekst: `Hver subagent starter med sin egen kontekst og læser ofte meget for at finde det, den skal bruge. Smallere opgaver til dem kunne spare ca. ${dollar(usd)}.`,
-        skridt: 'Giv subagenter en præcis opgave (hvilke filer, hvilket spørgsmål), og lad Claude selv søge, når opgaven er lille.',
+        titel: `Subagenter (${procent(kostede / g.projekt.usd)} af prisen)`,
+        skridt: 'giv dem smallere opgaver',
         usd,
         eksempler: flest(poster, x => x.p.usd ?? 0).map(x => `opgave ${x.o.nr}: ${x.p.navn} (${dollar(x.p.usd ?? 0)})`),
       },
@@ -164,9 +157,8 @@ const rutine: Regel = {
     return [
       {
         id: 'rutine',
-        titel: 'Små rutineopgaver blev dyre i en lang samtale',
-        tekst: `${ramte.length === 1 ? 'En kort opgave' : `${ramte.length} korte opgaver`} som commit og push kostede ${dollar(sum(ramte, x => x.o.usd))}, mest fordi hele samtalen blev læst med. I en ny, kort session havde de kostet ca. ${dollar(usd)} mindre.`,
-        skridt: 'Tag commit, push og deploy i en ny session eller efter /compact.',
+        titel: 'Commit og push i lang samtale',
+        skridt: 'tag dem efter /compact',
         usd,
         eksempler: flest(ramte, x => x.o.usd).map(x => `opgave ${x.o.nr}: "${x.o.tekst}" (${dollar(x.o.usd)})`),
       },
@@ -179,8 +171,8 @@ const overhead: Regel = {
   tjek: g => {
     if (!g.overhead) return []
     const dele = [
-      ...g.overhead.mcp.map(d => ({ ...d, navn: `${d.navn} (MCP)` })),
-      ...g.overhead.skills.map(d => ({ ...d, navn: d.navn.endsWith('skills') ? d.navn : `${d.navn} (skills)` })),
+      ...g.overhead.mcp.map(d => ({ ...d, slags: ' (MCP)' })),
+      ...g.overhead.skills.map(d => ({ ...d, slags: d.navn.endsWith('skills') ? '' : ' (skills)' })),
     ]
     const tokens = sum(dele, d => d.tokens)
     if (tokens < 10_000) return []
@@ -193,11 +185,10 @@ const overhead: Regel = {
     return [
       {
         id: 'overhead',
-        titel: `${fmt(tokens)} tokens fra forbindelser og plugins følger med i hver runde`,
-        tekst: `Værktøjer fra MCP-forbindelser og skills fra plugins lå i konteksten i alle projektets ${runder} runder; det kostede ca. ${dollar(usd)}. Bruger projektet dem ikke, er det penge ud af vinduet.`,
-        skridt: 'Slå de forbindelser og plugins fra, som dette projekt ikke bruger. Det virker fra næste session.',
+        titel: `Plugins og forbindelser (${fmt(tokens)} pr. runde)`,
+        skridt: `slå ubrugte fra, fx ${flest(dele, d => d.tokens, 1).map(d => d.navn).join('')}`,
         usd,
-        eksempler: flest(dele, d => d.tokens, 5).map(d => `${d.navn}: ${fmt(d.tokens)} tokens`),
+        eksempler: flest(dele, d => d.tokens, 5).map(d => `${d.navn}${d.slags}: ${fmt(d.tokens)} tokens`),
       },
     ]
   },
@@ -250,13 +241,17 @@ export const overheadFra = (
   }
 }
 
+// Rådet på én linje: "Lang samtale (879k tokens) → /compact efter hver færdig opgave".
+export const kortRaad = (r: Pick<Raad, 'titel' | 'skridt'>): string => `${r.titel} → ${r.skridt}`
+
+// Én linje pr. råd. Uden bjælker (til Claude via værktøjet) kommer eksemplerne med, så Claude kan svare på hvorfor.
 export const raadTekst = (titel: string, liste: readonly Raad[], visuel = true): string[] => {
-  if (liste.length === 0) return [`Råd til ${titel}: ingen lige nu. Forbruget ser fornuftigt ud.`]
+  if (liste.length === 0) return [`Ingen råd til ${titel} lige nu.`]
   const stoerst = liste[0]?.usd ?? 0
-  const linjer = [`Råd til at bruge færre tokens · ${titel}`, 'Beløbene er skøn over, hvad det kunne have sparet.']
+  const linjer = [`Råd · ${titel} · skønnet besparelse`, '']
   for (const r of liste) {
-    linjer.push('', `${visuel ? `${bjaelke(stoerst > 0 ? r.usd / stoerst : 0)} ` : ''}ca. ${dollar(r.usd)} at spare · ${r.titel}`, r.tekst, `→ ${r.skridt}`)
-    for (const e of r.eksempler) linjer.push(`Fx ${e}`)
+    if (visuel) linjer.push(`${bjaelke(stoerst > 0 ? r.usd / stoerst : 0, 10)} ${dollar(r.usd).padEnd(6)} ${kortRaad(r)}`)
+    else linjer.push(`${dollar(r.usd)}: ${kortRaad(r)}`, ...(r.eksempler.length > 0 ? [`  Fx ${r.eksempler.join('; ')}`] : []))
   }
   return linjer
 }

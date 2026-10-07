@@ -6,7 +6,7 @@ import { afkort, analyser, dollar, etiket, kontekstDele, opsummering } from './a
 import type { Agent, Kald, Trin } from './analyse'
 import { beskrivelsesPrompt, dagTekst, dageTekst, laesLinje, nySamling, opgaveTekst, projekt, projektTekst, renBeskrivelse, visteOpgaver } from './historik'
 import type { HistOpgave, Kilde, Projekt, Samling } from './historik'
-import { overheadFra, raad, raadTekst } from './raad'
+import { kortRaad, overheadFra, raad, raadTekst } from './raad'
 import type { Grundlag, Overhead, Raad } from './raad'
 
 const opgaver = atom({ plugin: 'token-maaler', key: 'opgaver' } as const, [])
@@ -240,7 +240,7 @@ const tjekRaad = async ($: EngineInterface) => {
     const nyt = liste.find(r => r.usd >= 0.5 && r.usd >= 2 * (vist[r.id] ?? 0))
     if (!nyt) return
     await $.store.set(noegle, { ...vist, [nyt.id]: nyt.usd })
-    $.ui.toast(`Råd: ${nyt.titel} · ca. ${dollar(nyt.usd)} at spare · /tokens råd`, { timeoutMs: 10_000 })
+    $.ui.toast(`Råd: ${kortRaad(nyt)} (ca. ${dollar(nyt.usd)})`, { timeoutMs: 10_000 })
   } catch {
     // Et råd må aldrig forstyrre arbejdet.
   }
@@ -258,7 +258,7 @@ const tekstFor = async ($: EngineInterface, p: Projekt, visning: Visning | 'dag'
   }
   if (visning === 'dage') return dageTekst(p, visuel)
   const [stoerst] = await raadFor($, p)
-  const raadLinje = stoerst ? `Største råd: ${stoerst.titel} (ca. ${dollar(stoerst.usd)} at spare). Skriv /tokens råd for alle råd.` : ''
+  const raadLinje = stoerst ? `Råd: ${kortRaad(stoerst)} (ca. ${dollar(stoerst.usd)}) · /tokens råd` : ''
   return projektTekst(p, visuel, await beskriv($, p, visteOpgaver(p)), raadLinje)
 }
 

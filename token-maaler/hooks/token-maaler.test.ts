@@ -238,7 +238,7 @@ test('analytikeren giver et råd efter en opgave i en lang samtale og gentager d
   }
 
   await enOpgave('t1')
-  expect(raadToasts()).toEqual([expect.stringMatching(/^Råd: Lang samtale: hver runde læser op til 400k tokens igen · ca\. \$0\.68 at spare · \/tokens råd$/)])
+  expect(raadToasts()).toEqual(['Råd: Lang samtale (400k tokens) → /compact efter hver færdig opgave (ca. $0.68)'])
 
   const baand = await $.ui.mount({ plugin: 'token-maaler', surface: 'desktop', component: 'AbovePrompt', props: baandProps } as never)
   expect((await baand.find({ key: 'raad' }))?.props.label).toBe('Råd (1)')
@@ -249,6 +249,6 @@ test('analytikeren giver et råd efter en opgave i en lang samtale og gentager d
   expect(raadToasts()).toHaveLength(1)
 
   const tekst = (await $.command.run({ command: 'tokens', args: 'råd' } as never)).text ?? ''
-  expect(tekst).toContain('Råd til at bruge færre tokens')
-  expect(tekst).toContain('→ Skriv /compact')
+  expect(tekst).toContain('Råd · ')
+  expect(tekst).toContain('→ /compact efter hver færdig opgave')
 })

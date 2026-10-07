@@ -1,1 +1,1 @@
-{ "name": "token-maaler", "version": "0.6.1", "description": "Viser hvad projektet, hver opgave og hver dag kostede i tokens og penge, og giver råd til at bruge færre", "types": "./types/index.d.ts" }
+{ "name": "token-maaler", "version": "0.6.2", "description": "Viser hvad projektet, hver opgave og hver dag kostede i tokens og penge, og giver råd til at bruge færre", "types": "./types/index.d.ts" }

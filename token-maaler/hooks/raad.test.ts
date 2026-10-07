@@ -55,7 +55,8 @@ describe('analytikerens regler', () => {
 
     expect(liste.map(r => r.usd)).toEqual([...liste.map(r => r.usd)].sort((a, b) => b - a))
     naer(efter('lang-samtale')?.usd, 4.94 * 0.9 + 3 * 0.8)
-    expect(efter('lang-samtale')?.titel).toBe('Lang samtale: hver runde læser op til 600k tokens igen')
+    expect(efter('lang-samtale')?.titel).toBe('Lang samtale (600k tokens)')
+    expect(efter('pauser')?.titel).toBe('Pauser (cachen udløb 1 gang)')
     expect(efter('lang-samtale')?.eksempler[0]).toBe('opgave 7: 600k tokens × 41 runder (ca. $4.45 at spare)')
     naer(efter('pauser')?.usd, 4.33 * (1 - 60_000 / 541_000))
     naer(efter('store-resultater')?.usd, 0.7)
@@ -106,9 +107,10 @@ describe('analytikerens regler', () => {
     // 24k tokens læst i 300 runder til 0,20 $/M og skrevet én gang til 8 $/M.
     naer(r?.usd, 24_000 * 300 * 0.2e-6 + 24_000 * 8e-6)
     expect(r?.eksempler[0]).toBe('forbindelsen med data_cms_tool (MCP): 12.0k tokens')
+    expect(r?.skridt).toBe('slå ubrugte fra, fx forbindelsen med data_cms_tool')
   })
 
-  test('teksten har bjælker, handlinger og eksempler, men ingen nummererede linjer', () => {
+  test('hvert råd står på én linje med bjælke, beløb og handling; eksemplerne kun uden bjælker', () => {
     const g: Grundlag = {
       projekt: projekt(20),
       opgaver: [{ o: opgave(7, 'Byg', 8.55), a: analyse({ startKontekst: 600_000, runder: 41, poster: [post('start', 4.94)] }) }],
@@ -116,11 +118,13 @@ describe('analytikerens regler', () => {
     }
     const linjer = raadTekst('Test', raad(g))
 
-    expect(linjer[0]).toBe('Råd til at bruge færre tokens · Test')
-    expect(linjer.some(l => /^█+░* ca\. \$4\.45 at spare · Lang samtale/.test(l))).toBe(true)
-    expect(linjer.some(l => l.startsWith('→ Skriv /compact'))).toBe(true)
-    expect(linjer.some(l => l.startsWith('Fx opgave 7:'))).toBe(true)
-    expect(linjer.some(l => /^\s*\d+[.)]\s/.test(l))).toBe(false)
-    expect(raadTekst('Test', [])).toEqual(['Råd til Test: ingen lige nu. Forbruget ser fornuftigt ud.'])
+    expect(linjer).toEqual(['Råd · Test · skønnet besparelse', '', '██████████ $4.45  Lang samtale (600k tokens) → /compact efter hver færdig opgave'])
+    expect(raadTekst('Test', raad(g), false)).toEqual([
+      'Råd · Test · skønnet besparelse',
+      '',
+      '$4.45: Lang samtale (600k tokens) → /compact efter hver færdig opgave',
+      '  Fx opgave 7: 600k tokens × 41 runder (ca. $4.45 at spare)',
+    ])
+    expect(raadTekst('Test', [])).toEqual(['Ingen råd til Test lige nu.'])
   })
 })
