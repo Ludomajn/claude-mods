@@ -97,7 +97,7 @@ test('en live-målt opgave vises i båndet og som besked', async ($, on) => {
 
   for (const surface of ['terminal', 'desktop'] as const) {
     const baand = await $.ui.mount({ plugin: 'token-maaler', surface, component: 'AbovePrompt', props: baandProps } as never)
-    expect((await baand.find({ type: 'Text', text: /Sidste opgave: .*mest: Read big\.ts/ }))?.type).toBe('Text')
+    expect((await baand.find({ type: 'Text', text: /^Sidste opgave: 1,95 kr $/ }))?.type).toBe('Text')
     expect(await baand.find({ key: 'detaljer' })).toBeDefined()
     expect((await baand.find({ key: 'raad' }))?.props.label).toBe('Råd')
     expect(await baand.find({ key: 'projekt' })).toBeUndefined()

@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { ForbrugGrafik, Graense, KontekstDel, Soejle } from '../types'
-import { afkort, analyser, etiket, fmt, kontekstDele, opsummering } from './analyse'
+import { afkort, analyser, etiket, fmt, kontekstDele } from './analyse'
 import type { Agent, Kald, Trin } from './analyse'
 import { beskrivelsesPrompt, dagTekst, dageTekst, datoNoegle, datoTekst, laesLinje, nySamling, opgaveTekst, projekt, projektTekst, renBeskrivelse, visteOpgaver } from './historik'
 import type { HistOpgave, Kilde, Projekt, Samling } from './historik'
@@ -933,7 +933,7 @@ export const register: Register = (on, options) => {
 
     return (
       <Box alignItems="center">
-        <Text dimColor>Sidste opgave: {opsummering(sidste)} </Text>
+        <Text dimColor>Sidste opgave: {sidste.usd !== null ? graenseForbrug(sidste.usd) : `${fmt(sidste.ind + sidste.ud)} tokens`} </Text>
         <Button
           key="detaljer"
           label="Detaljer"
