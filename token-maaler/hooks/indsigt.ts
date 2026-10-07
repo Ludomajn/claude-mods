@@ -1,5 +1,7 @@
 import { afkortOrd, bjaelke } from './analyse'
-import { maal, maalForklaring, maalKr } from './enhed'
+import type { Soejle } from '../types'
+import { KVARTER, maal, maalForklaring, maalKr } from './enhed'
+import { datoNoegle } from './historik'
 import { beloeb, MEST, raadBlok, restLinje } from './raad'
 import type { Raad } from './raad'
 
@@ -46,39 +48,88 @@ export const tvaersRaad = (liste: readonly Resume[], ekstra: readonly Raad[] = [
 }
 
 // Indsigt i hele forbruget: totalen, rådene på tværs (højst tre linjer hver) og de dyreste samtaler.
-export const indsigtTekst = (liste: readonly Resume[], ekstra: readonly Raad[] = [], visuel = true): string[] => {
-  if (liste.length === 0) return ['Ingen samtaler med forbrug endnu.']
+// Alle samtaler: hvor mange, hvor mange aktive dage og forbruget i alt.
+export const alleSamtalerTekst = (liste: readonly Resume[]): string[] => {
+  if (liste.length === 0) return ['**Alle samtaler**', 'Ingen samtaler med forbrug endnu.']
   const dage = new Set(liste.flatMap(s => s.dage)).size
-  const ud = [
+  return [
     '**Alle samtaler**',
     `${samtaler(liste.length)} · ${dage === 1 ? '1 aktiv dag' : `${dage} aktive dage`} · ${maalKr(sum(liste, s => s.usd))} i alt`,
-    '',
-    `**Råd på tværs** · tal = ${maalForklaring()}, du cirka kunne have sparet`,
   ]
+}
+
+// Rådene på tværs af alle samtaler, højst fem, hver på højst tre linjer.
+export const godeRaadTekst = (liste: readonly Resume[], ekstra: readonly Raad[] = [], visuel = true): string[] => {
+  const ud = [`**Gode råd til dig** · tal = ${maalForklaring()}, du cirka kunne have sparet`]
   const raad = tvaersRaad(liste, ekstra)
   const stoerst = raad[0]?.usd ?? 0
   if (raad.length === 0) ud.push('', 'Ingen råd lige nu.')
   for (const r of raad.slice(0, MEST)) ud.push('', ...raadBlok(r, r.hvorfor, stoerst > 0 ? r.usd / stoerst : 0, visuel, ` · ${r.antal}`))
-  ud.push(...restLinje(raad.slice(MEST)))
-  const dyreste = [...liste].sort((a, b) => b.usd - a.usd).slice(0, 3)
-  const top = dyreste[0]?.usd ?? 0
-  ud.push('', '**Dyreste samtaler**')
-  for (const s of dyreste) ud.push(`${visuel ? `${bjaelke(top > 0 ? s.usd / top : 0, 10)} ` : ''}${beloeb(s.usd)} · ${afkortOrd(s.titel, 50)}`)
-  return ud
+  return [...ud, ...restLinje(raad.slice(MEST))]
 }
 
-// Forbrug: ugen i alt og ugens dyreste samtaler, med bjælker i det godkendte format.
+// Indsigt som tekst til Claudes værktøj: alle samtaler, rådene og de dyreste samtaler nogensinde.
+export const indsigtTekst = (liste: readonly Resume[], ekstra: readonly Raad[] = [], visuel = true): string[] => {
+  if (liste.length === 0) return ['Ingen samtaler med forbrug endnu.']
+  const dyreste = [...liste].sort((a, b) => b.usd - a.usd).slice(0, 3)
+  const top = dyreste[0]?.usd ?? 0
+  return [
+    ...alleSamtalerTekst(liste),
+    '',
+    ...godeRaadTekst(liste, ekstra, visuel),
+    '',
+    '**Dyreste samtaler**',
+    ...dyreste.map(s => `${visuel ? `${bjaelke(top > 0 ? s.usd / top : 0, 10)} ` : ''}${beloeb(s.usd)} · ${afkortOrd(s.titel, 50)}`),
+  ]
+}
+
+// Ugens dyreste samtaler i ugegrænsens vindue, med bjælker i det godkendte format.
 export const ugensSamtalerTekst = (samtaler: readonly { titel: string; usd: number }[], periode: string, visuel = true): string[] => {
-  if (samtaler.length === 0) return [`Intet forbrug ${periode}.`]
+  const overskrift = `**Ugens dyreste samtaler** · ${periode}`
+  if (samtaler.length === 0) return [overskrift, `Intet forbrug ${periode}.`]
   const sorteret = [...samtaler].sort((a, b) => b.usd - a.usd)
   const top = sorteret[0]?.usd ?? 0
   const vist = sorteret.slice(0, MEST)
   const rest = sorteret.slice(MEST)
   return [
-    `I alt ${periode}: ${maalKr(sum(sorteret, s => s.usd))} · ${samtaler.length === 1 ? '1 samtale' : `${samtaler.length} samtaler`}`,
-    '',
-    '**Ugens dyreste samtaler**',
+    overskrift,
+    `I alt ${maalKr(sum(sorteret, s => s.usd))} · ${samtaler.length === 1 ? '1 samtale' : `${samtaler.length} samtaler`}`,
     ...vist.map(s => `${visuel ? `${bjaelke(top > 0 ? s.usd / top : 0, 10)} ` : ''}${maalKr(s.usd)} · ${afkortOrd(s.titel, 50)}`),
     ...(rest.length ? [`Plus ${rest.length === 1 ? '1 mindre samtale' : `${rest.length} mindre samtaler`}: ${maal(sum(rest, s => s.usd))}.`] : []),
   ]
+}
+
+const UGEDAGE = ['mandag', 'tirsdag', 'onsdag', 'torsdag', 'fredag', 'lørdag', 'søndag']
+
+// Det gennemsnitlige forbrug pr. ugedag over hele historikken: forbruget på alle mandage delt med
+// antallet af mandage fra den første aktive dag til i dag, og så videre.
+export const ugedage = (resumeer: readonly Pick<Resume, 'kvarterer'>[], nu: number): Soejle[] => {
+  const total = [0, 0, 0, 0, 0, 0, 0]
+  let foerst = Infinity
+  for (const r of resumeer) {
+    for (const [n, v] of Object.entries(r.kvarterer ?? {})) {
+      const t = Number(n) * KVARTER
+      foerst = Math.min(foerst, t)
+      const d = (new Date(t).getDay() + 6) % 7
+      total[d] = (total[d] ?? 0) + v
+    }
+  }
+  const antal = [0, 0, 0, 0, 0, 0, 0]
+  if (Number.isFinite(foerst)) {
+    // Én gang pr. kalenderdag fra den første aktive dag til i dag.
+    for (let dato = datoNoegle(foerst), t = foerst; dato <= datoNoegle(nu); t += 86_400_000, dato = datoNoegle(t)) {
+      const d = (new Date(t).getDay() + 6) % 7
+      antal[d] = (antal[d] ?? 0) + 1
+    }
+  }
+  return UGEDAGE.map((navn, d) => {
+    const n = antal[d] ?? 0
+    const gns = n > 0 ? (total[d] ?? 0) / n : 0
+    return {
+      etiket: navn.slice(0, 3),
+      vaerdi: gns,
+      tal: gns > 0 ? maal(gns) : '',
+      tooltip: `${navn[0]?.toUpperCase() ?? ''}${navn.slice(1)}: ${gns > 0 ? `${maalKr(gns)} i gennemsnit` : 'intet forbrug'} (${n} ${n === 1 ? navn : `${navn}e`})`,
+    }
+  })
 }

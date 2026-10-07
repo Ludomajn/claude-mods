@@ -167,23 +167,28 @@ test('/tokens råd alle samler alle samtaler i alle projektmapper og husker resu
 
   const tekst = (await $.command.run({ command: 'tokens', args: 'råd alle' } as never)).text ?? ''
   const linjer = tekst.split('\n')
-  // Indsigt: ugens grafer først, så alle samtaler med rådene på tværs.
+  // Indsigt: målerne og ugedagene, så alle samtaler, ugens dyreste samtaler og gode råd.
   expect(linjer[0]).toBe('**Indsigt**')
-  expect(linjer.slice(linjer.indexOf('**Alle samtaler**'), linjer.indexOf('**Alle samtaler**') + 8)).toEqual([
+  const afsnit = linjer.filter(l => l.startsWith('**') && !l.includes('kr ·')).map(l => l.split(' · ')[0])
+  expect(afsnit).toEqual([
+    '**Indsigt**',
+    '**Dit gennemsnitlige totale forbrug fordelt henover dage på ugen**',
     '**Alle samtaler**',
-    expect.stringMatching(/^2 samtaler · 3 aktive dage · \d+,\d+ kr i alt$/),
-    '',
-    '**Råd på tværs** · tal = kroner, du cirka kunne have sparet',
+    '**Ugens dyreste samtaler**',
+    '**Gode råd til dig**',
+  ])
+  const alle = linjer.indexOf('**Alle samtaler**')
+  expect(linjer[alle + 1]).toMatch(/^2 samtaler · 3 aktive dage · \d+,\d+ kr i alt$/)
+  const raad = linjer.findIndex(l => l.startsWith('**Gode råd til dig**'))
+  expect(linjer.slice(raad)).toEqual([
+    '**Gode råd til dig** · tal = kroner, du cirka kunne have sparet',
     '',
     '██████████ **4,39 kr · Lang samtale** · 1 samtale',
     'I Bæverspil (4,39 kr).',
     '→ Skriv `/compact`, når en opgave er færdig, så hver runde læser mindre.',
   ])
-  expect(linjer.slice(-3)).toEqual([
-    '**Dyreste samtaler**',
-    expect.stringMatching(/^██████████ \d+,\d+ kr · Bæverspil$/),
-    expect.stringMatching(/^█░+ \d+,\d+ kr · Webshop-agent$/),
-  ])
+  // De dyreste samtaler står kun én gang: ugens.
+  expect(linjer.filter(l => l.includes('dyreste samtaler'))).toHaveLength(1)
   // Bæverspil er uændret, så dens resume hentes fra $.store i stedet for at læse filen igen.
   laaste.add('/h/.claude/projects/-p-y/s2.jsonl')
   expect((await $.command.run({ command: 'tokens', args: 'indsigt' } as never)).text).toBe(tekst)
@@ -284,7 +289,7 @@ test('historikken: /tokens viser projektet, /tokens <nr> en opgave, og panelet o
   expect(await panel.find({ key: 'projekt' })).toBeUndefined()
   await panel.press({ key: 'indsigt' })
   // Forbrug: graferne øverst og ugens dyreste samtaler under dem.
-  expect((await panel.find({ type: 'Text', text: /^Ugen pr\. dag$/ }))?.props.bold).toBe(true)
+  expect((await panel.find({ type: 'Text', text: /^Dit gennemsnitlige totale forbrug fordelt henover dage på ugen$/ }))?.props.bold).toBe(true)
   // Uden målte grænser er der kun søjlerne for ugen; den seneste opgave vises ikke her.
   expect(await panel.findAll({ type: 'Svg' })).toHaveLength(1)
   expect(await panel.find({ type: 'Text', text: /Seneste opgave/ })).toBeUndefined()
@@ -438,9 +443,10 @@ test('grænserne måles ud fra forbruget i deres vinduer, og så står tallene s
 
   const linjer = ((await $.command.run({ command: 'tokens', args: 'råd alle' } as never)).text ?? '').split('\n')
   const alle = linjer.slice(linjer.indexOf('**Alle samtaler**'))
-  expect(alle[3]).toBe('**Råd på tværs** · tal = andel af ugens grænse, du cirka kunne have sparet')
+  const raad = linjer.slice(linjer.findIndex(l => l.startsWith('**Gode råd til dig**')))
+  expect(raad[0]).toBe('**Gode råd til dig** · tal = andel af ugens grænse, du cirka kunne have sparet')
   // $0.675 sparet ÷ $0.082 pr. procentpoint ≈ 8,2 % af ugen.
-  expect(alle[5]).toBe('██████████ **8,2 % af ugen · Lang samtale** · 1 samtale')
+  expect(raad[2]).toBe('██████████ **8,2 % af ugen · Lang samtale** · 1 samtale')
   expect(alle[1]).toMatch(/^2 samtaler · 3 aktive dage · \d+ % af ugen \(\d+,\d+ kr\) i alt$/)
 })
 
@@ -474,7 +480,7 @@ test('båndet viser 5-timersgrænsen og ugens grænse som målere: en graf på d
   await terminal.unmount()
 
   const tekst = (await $.command.run({ command: 'tokens', args: 'forbrug' } as never)).text ?? ''
-  expect(tekst.split('\n').slice(0, 4)).toEqual(['**Indsigt**', expect.stringMatching(/^5 t ██░+ 23 %/), '', '**Ugen pr. dag** · de seneste 7 dage · alle samtaler'])
+  expect(tekst.split('\n').slice(0, 4)).toEqual(['**Indsigt**', expect.stringMatching(/^5 t ██░+ 23 %/), '', '**Dit gennemsnitlige totale forbrug fordelt henover dage på ugen**'])
 })
 
 test('Forbrug gælder alle samtaler: ugen pr. dag og ugens dyreste samtaler på tværs af projektmapper', async ($, on) => {
@@ -482,14 +488,18 @@ test('Forbrug gælder alle samtaler: ugen pr. dag og ugens dyreste samtaler på 
   mock.store(on)
   toMapper(on, new Set())
   const linjer = ((await $.command.run({ command: 'tokens', args: 'forbrug' } as never)).text ?? '').split('\n')
-  const start = linjer.indexOf('**Ugens dyreste samtaler**')
-  expect(linjer[start - 2]).toMatch(/^I alt de seneste 7 dage: \d+,\d+ kr · 2 samtaler$/)
-  expect(linjer.slice(start + 1, start + 3)).toEqual([
+  const start = linjer.indexOf('**Ugens dyreste samtaler** · de seneste 7 dage')
+  expect(linjer.slice(start + 1, start + 4)).toEqual([
+    expect.stringMatching(/^I alt \d+,\d+ kr · 2 samtaler$/),
     expect.stringMatching(/^██████████ \d+,\d+ kr · Bæverspil$/),
     expect.stringMatching(/^█░+ \d+,\d+ kr · Webshop-agent$/),
   ])
-  // Søjlerne dækker de 7 dage frem til i dag; Bæverspillets dag (onsdag 1. oktober) har forbrug.
-  expect(linjer.filter(l => /^[█░]{10} /.test(l) && /(ons|tor|i dag)/.test(l)).length).toBeGreaterThan(0)
+  // Ugedagene er gennemsnit over hele historikken (26. sep. til 2. okt.: hver ugedag én gang):
+  // Bæverspillet var torsdag 1. oktober, Webshop-agenten lørdag og søndag.
+  const dage = linjer.filter(l => /^[█░]{10} (man|tir|ons|tor|fre|lør|søn) /.test(l))
+  expect(dage.map(l => l.slice(11, 14))).toEqual(['man', 'tir', 'ons', 'tor', 'fre', 'lør', 'søn'])
+  expect(dage[3]).toMatch(/^██████████ tor  \d+,\d+ kr$/)
+  expect(dage[0]).toBe('░░░░░░░░░░ man  ')
 })
 
 test('Forbrug følger ugens grænse: dagene siden den sidst blev nulstillet', async ($, on) => {
@@ -504,7 +514,8 @@ test('Forbrug følger ugens grænse: dagene siden den sidst blev nulstillet', as
     changed: ['rateLimits'],
   } as never)
   const linjer = ((await $.command.run({ command: 'tokens', args: 'forbrug' } as never)).text ?? '').split('\n')
-  expect(linjer[3]).toMatch(/^\*\*Ugen pr\. dag\*\* · siden søn kl\. \d\d:00 · alle samtaler$/)
-  expect(linjer.find(l => l.startsWith('I alt'))).toMatch(/^I alt siden søn kl\. \d\d:00: /)
-  expect(linjer.slice(0, linjer.indexOf('**Alle samtaler**')).filter(l => /^[█░]{10} /.test(l))).toHaveLength(6 + 2)
+  const start = linjer.findIndex(l => l.startsWith('**Ugens dyreste samtaler**'))
+  expect(linjer[start]).toMatch(/^\*\*Ugens dyreste samtaler\*\* · siden søn kl\. \d\d:00$/)
+  // Webshop-agentens første dag (26. september) ligger før ugen, så kun Bæverspillet og søndagen er med.
+  expect(linjer[start + 1]).toMatch(/^I alt \d+,\d+ kr · 2 samtaler$/)
 })

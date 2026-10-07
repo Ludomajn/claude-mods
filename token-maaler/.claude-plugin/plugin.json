@@ -1,6 +1,6 @@
 {
   "name": "token-maaler",
-  "version": "0.12.3",
+  "version": "0.13.0",
   "description": "Viser hvad projektet, hver opgave og hver dag kostede i tokens og penge, og giver råd til at bruge færre",
   "types": "./types/index.d.ts",
   "userConfig": {
