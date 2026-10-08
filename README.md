@@ -6,7 +6,7 @@ Mods til Claude Code.
 
 | Mod | Hvad den gør |
 | --- | --- |
-| [token-maaler](token-maaler) | Viser, hvor meget af dine grænser (5 timer og ugen) dine samtaler bruger, med indsigt på tværs af samtaler, råd til at bruge færre tokens og bedre første prompts. |
+| [token-maaler](token-maaler) | Viser, hvor meget af dine grænser (5 timer og ugen) dine samtaler bruger, også planlagte opgaver og forbrug i chat og Cowork, med indsigt på tværs af samtaler, råd til at bruge færre tokens og bedre første prompts. |
 
 ## Installation
 

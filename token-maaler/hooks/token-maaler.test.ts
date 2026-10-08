@@ -130,12 +130,13 @@ test('indstillingerne i /config kan slå velkomsten fra', { options: { velkomst:
 
 // To projektmapper med hver sin samtale; den lange samtale giver et råd om /compact.
 // En sti i `laaste` kan ikke læses, så det kan ses, at et resume kommer fra $.store.
-const toMapper = (on: On, laaste: Set<string>) => {
-  mock.env(on, { HOME: '/h' })
+const toMapper = (on: On, laaste: Set<string>, ekstra: Record<string, string> = {}, miljoe: Record<string, string> = {}) => {
+  mock.env(on, { HOME: '/h', ...miljoe })
   const rod = '/h/.claude/projects'
   const filer: Record<string, string> = {
     [`${rod}/-p-x/s1.jsonl`]: transcript,
     [`${rod}/-p-y/s2.jsonl`]: [JSON.stringify({ type: 'custom-title', customTitle: 'Bæverspil' }), langTranscript].join('\n'),
+    ...ekstra,
   }
   on('session.id', async () => ({ value: 's1' }))
   on('session.cwd', async () => ({ value: '/p/x' }))
@@ -583,6 +584,7 @@ test('lidt efter start ryddes nøgler fra ældre versioner op, og de nuværende 
   const lager = new Map<string, unknown>(
     Object.entries({
       'indsigt:v3:a': 1,
+      'indsigt:v4:a': 1,
       'promptsmart:v1:a': 1,
       'raad-vist:a': 1,
       'beskrivelse:a:1:2': 'gammel',
@@ -609,8 +611,153 @@ test('lidt efter start ryddes nøgler fra ældre versioner op, og de nuværende 
   await ur.advance(20_000)
   for (let i = 0; i < 100 && lager.has('raad-vist:a'); i++) await vent(10)
   const noegler = [...lager.keys()]
-  expect(noegler.filter(k => /^(indsigt:v3|promptsmart:v1|raad-vist|beskrivelse:a)/.test(k))).toEqual([])
+  expect(noegler.filter(k => /^(indsigt:v3|indsigt:v4|promptsmart:v1|raad-vist|beskrivelse:a)/.test(k))).toEqual([])
   expect(noegler).toEqual(expect.arrayContaining(['beskrivelse:v2:a:1:2', 'promptsmart:v2:a', 'kalibrering:v1']))
   // Resumeerne for begge samtaler er samlet i den aktuelle version.
-  expect(noegler.filter(k => k.startsWith('indsigt:v4:')).sort()).toEqual(['indsigt:v4:s1', 'indsigt:v4:s2'])
+  expect(noegler.filter(k => k.startsWith('indsigt:v5:')).sort()).toEqual(['indsigt:v5:s1', 'indsigt:v5:s2'])
+})
+
+// Kontoens procent hvert kvarter, som Claude-appen gemmer den i plan-usage-history.json.
+const HISTORIK_FIL = '/h/Library/Application Support/Claude/plan-usage-history.json'
+const KVARTER_MS = 15 * 60_000
+const historik = (perioder: { fra: string; kvarterer: number; sd: (i: number) => number }[]) =>
+  JSON.stringify({
+    version: 2,
+    samples: perioder.flatMap(r => Array.from({ length: r.kvarterer }, (_, i) => ({ t: Date.parse(r.fra) + i * KVARTER_MS, org: 'o', u: { fh: 0, sd: r.sd(i) } }))),
+  })
+
+// Uge A (24. september): procenten stiger til 40, men Code forklarer kun 3. Uge B (fra 1. oktober): Bæverspillet
+// bruger 20 % kl. 9, og natten til den 3. stiger procenten 12 point på tre timer, mens ingen Code kører.
+const kontoHistorik = historik([
+  { fra: '2026-09-24T00:00:00Z', kvarterer: 7 * 96, sd: i => Math.min(40, Math.floor(i / 16)) },
+  { fra: '2026-10-01T00:00:00Z', kvarterer: 240, sd: i => (i < 37 ? 0 : i < 176 ? 20 : Math.min(32, 20 + (i - 176))) },
+])
+
+test('chat, Cowork m.m. vises, når kontoens procent er højere, end Code kan forklare', async ($, on) => {
+  mock.clock(on, { now: Date.parse('2026-10-03T12:00:00.000Z') })
+  // $0.04 pr. procentpoint af ugen, målt i en tidligere session.
+  mock.store(on, { 'kalibrering:v1': { seven_day: [{ t: 1, usdPrProcent: 0.04 }] } })
+  toMapper(on, new Set(), { [HISTORIK_FIL]: kontoHistorik })
+  const linjer = ((await $.command.run({ command: 'tokens', args: 'indsigt' } as never)).text ?? '').split('\n')
+
+  const alle = linjer.slice(linjer.indexOf('**Alle samtaler**'))
+  expect(alle[1]).toMatch(/^2 samtaler · 3 aktive dage · \d+ % af ugen \([\d.,]+ kr\) i alt$/)
+  expect(alle[2]).toMatch(/^Chat, Cowork m\.m\. uden for samtalerne: 4\d % af ugen \([\d.,]+ kr\) de seneste \d+ dage$/)
+
+  // Ugens dyreste samtaler: samtalerne, så chat og Cowork på sin egen linje med den største periode under.
+  const uge = linjer.slice(linjer.findIndex(l => l.startsWith('**Ugens dyreste samtaler**')))
+  const andet = uge.findIndex(l => l.includes('Chat, Cowork m.m. (ikke målt pr. samtale)'))
+  expect(andet).toBeGreaterThan(2)
+  expect(uge[andet]).toMatch(/^[█░]{10} 1\d % af ugen \([\d.,]+ kr\) · Chat, Cowork m\.m\. \(ikke målt pr\. samtale\)$/)
+  expect(uge[andet + 1]).toMatch(/^↳ .* kl\. \d{2}:\d{2}-\d{2}:\d{2} · 12 % af ugen \(3,12 kr\)$/)
+  expect(uge[andet + 2]).toBe('')
+
+  // Mere end en fjerdedel af ugens procent er uden for Code: et råd, som gælder hele kontoen.
+  const raad = linjer.slice(linjer.findIndex(l => l.startsWith('**Gode råd til dig**')))
+  const i = raad.findIndex(l => l.includes('Chat og Cowork'))
+  expect(raad[i]).toMatch(/^[█░]{10} \*\*\d+(,\d)? % af ugen · Chat og Cowork\*\* · hele kontoen$/)
+  expect(raad[i + 1]).toMatch(/^Ca\. [\d.,]+ % af ugen \([\d.,]+ kr\) gik til chat, Cowork m\.m\. uden for Code\.$/)
+  expect(raad[i + 2]).toBe('→ Start en ny chat til nye emner, og vælg en mindre model til lette spørgsmål.')
+
+  // Værktøjet til Claude får de samme tal, uden bjælker.
+  const vaerktoej = $.tool.call as unknown as (input: Record<string, unknown>) => Promise<{ result?: unknown }>
+  const svar = String((await vaerktoej({ tool: 'mcp__token-maaler__historik', alle: true })).result)
+  expect(svar).toContain('Chat, Cowork m.m. uden for samtalerne:')
+  expect(svar).toContain('hele kontoen')
+})
+
+test('uden en historik fra appen står der intet om chat og Cowork', async ($, on) => {
+  mock.clock(on, { now: Date.parse('2026-10-03T12:00:00.000Z') })
+  mock.store(on, { 'kalibrering:v1': { seven_day: [{ t: 1, usdPrProcent: 0.04 }] } })
+  toMapper(on, new Set())
+  const tekst = (await $.command.run({ command: 'tokens', args: 'indsigt' } as never)).text ?? ''
+  expect(tekst).not.toContain('Chat, Cowork')
+  expect(tekst).not.toContain('Chat og Cowork')
+})
+
+test('en historik uden for Code ændrer ikke andelene, når Code forklarer hele ugen', async ($, on) => {
+  mock.clock(on, { now: Date.parse('2026-10-03T12:00:00.000Z') })
+  mock.store(on, { 'kalibrering:v1': { seven_day: [{ t: 1, usdPrProcent: 0.04 }] } })
+  // Procenten følger Codes forbrug nøjagtigt: Bæverspillet bruger $0.82 = 20,5 % ved 0,04 dollars pr. procentpoint.
+  toMapper(on, new Set(), { [HISTORIK_FIL]: historik([{ fra: '2026-10-01T00:00:00Z', kvarterer: 240, sd: i => (i < 37 ? 0 : 20) }]) })
+  const tekst = (await $.command.run({ command: 'tokens', args: 'indsigt' } as never)).text ?? ''
+  expect(tekst).not.toContain('Chat, Cowork')
+})
+
+test('kontoens historik hæver enheden, så chat ikke får Codes forbrug til at se dyrere ud', async ($, on) => {
+  const ur = mock.clock(on, { now: Date.parse('2026-10-03T12:00:00.000Z') })
+  // Sessionerne målte 0,02 dollars pr. procentpoint, fordi chat også brugte af ugen; i uge B, hvor Code
+  // brugte det meste, viser historikken 0,041.
+  mock.store(on, { 'kalibrering:v1': { seven_day: [{ t: 1, usdPrProcent: 0.02 }] } })
+  toMapper(on, new Set(), {
+    [HISTORIK_FIL]: historik([
+      { fra: '2026-09-24T00:00:00Z', kvarterer: 7 * 96, sd: i => Math.min(40, Math.floor(i / 16)) },
+      { fra: '2026-10-01T00:00:00Z', kvarterer: 240, sd: i => (i < 37 ? 0 : 20) },
+    ]),
+  })
+  on('session.measure', async (_, e) => ({ changed: e.changed }))
+  await $.session.measure({
+    context: { window: 1_000_000 },
+    rateLimits: [{ kind: 'seven_day', percentUsed: 40, resetsAt: '2026-10-08T00:00:00.000Z' }],
+    changed: ['rateLimits'],
+  } as never)
+  await ur.advance(2_000)
+  const klar = async () => ((await $.command.run({ command: 'tokens', args: 'råd alle' } as never)).text ?? '').includes('16 % af ugen')
+  for (let i = 0; i < 50 && !(await klar()); i++) await vent(10)
+  const linjer = ((await $.command.run({ command: 'tokens', args: 'råd alle' } as never)).text ?? '').split('\n')
+  const raad = linjer.slice(linjer.findIndex(l => l.startsWith('**Gode råd til dig**')))
+  // $0.675 sparet ÷ $0.041 pr. procentpoint = 16 % af ugen (ikke 33 % ved 0,02).
+  expect(raad[2]).toBe('██████████ **16 % af ugen · Lang samtale** · 1 samtale')
+})
+
+// En planlagt opgave starter sin samtale med opgavens tekst i <scheduled-task>, efter en fast indledning.
+const planlagtKoersel = (navn: string, tid: string) =>
+  [
+    linje('user', tid, {
+      origin: { kind: 'task-notification', subkind: 'scheduled-trigger', fireReason: 'scheduled' },
+      message: {
+        role: 'user',
+        content: `<scheduled-task name="${navn}" file="/h/.claude/scheduled-tasks/${navn}/SKILL.md">\nThis is an automated run of a scheduled task. The user is not present to answer questions.\n\nLav ugens rapport.\n</scheduled-task>`,
+      },
+    }),
+    kald(`p-${navn}-${tid}`, tid),
+  ].join('\n')
+
+test('samtaler, som planlagte opgaver startede, er mærket, og kørslerne af samme opgave lægges sammen', async ($, on) => {
+  mock.clock(on, { now: Date.parse('2026-09-28T12:00:00.000Z') })
+  mock.store(on, { 'kalibrering:v1': { seven_day: [{ t: 1, usdPrProcent: 0.04 }] } })
+  const rod = '/h/.claude/projects/-p-y'
+  toMapper(on, new Set(), {
+    [`${rod}/s3.jsonl`]: planlagtKoersel('ugens-rapport', '2026-09-27T08:00:00.000Z'),
+    [`${rod}/s4.jsonl`]: planlagtKoersel('ugens-rapport', '2026-09-28T08:00:00.000Z'),
+    [`${rod}/s5.jsonl`]: planlagtKoersel('oprydning', '2026-09-28T09:00:00.000Z'),
+  })
+  const kaldt: string[] = []
+  on('model.complete', async (_, e) => {
+    kaldt.push(e.prompt)
+    return { value: { isAnswered: true, text: '{"kaeder": []}', usage: {} } as never }
+  })
+  on('ui.open', async () => ({ value: { isPlaced: true } as never }))
+
+  const linjer = ((await $.command.run({ command: 'tokens', args: 'indsigt' } as never)).text ?? '').split('\n')
+  const alle = linjer.slice(linjer.indexOf('**Alle samtaler**'))
+  expect(alle[1]).toMatch(/^5 samtaler · /)
+  expect(alle[2]).toMatch(/^Heraf planlagte opgaver: 3 kørsler af 2 opgaver · [\d.,]+ % af ugen \([\d.,]+ kr\)$/)
+  // Ugens samtaler: de to kørsler af ugens-rapport er én linje, med deres samlede forbrug.
+  const uge = linjer.slice(linjer.findIndex(l => l.startsWith('**Ugens dyreste samtaler**')))
+  expect(uge.filter(l => l.includes('Planlagt: ugens-rapport'))).toEqual([expect.stringMatching(/^[█░]{10} [\d.,]+ % af ugen \([\d.,]+ kr\) · Planlagt: ugens-rapport · 2 kørsler$/)])
+  expect(uge.filter(l => l.includes('Planlagt: oprydning'))).toEqual([expect.stringMatching(/ · Planlagt: oprydning · 1 kørsel$/)])
+  // Opgavens tekst er ikke en prompt, brugeren skrev: Dine prompts gennemgår kun de to almindelige samtaler.
+  await $.command.run({ command: 'tokens', args: 'prompts' } as never)
+  expect(kaldt.filter(p => p.includes('Lav ugens rapport'))).toEqual([])
+  expect(kaldt.length).toBeGreaterThan(0)
+})
+
+test('en almindelig samtale mærkes ikke som planlagt', async ($, on) => {
+  mock.clock(on, { now: Date.parse('2026-09-28T12:00:00.000Z') })
+  mock.store(on, { 'kalibrering:v1': { seven_day: [{ t: 1, usdPrProcent: 0.04 }] } })
+  toMapper(on, new Set())
+  const tekst = (await $.command.run({ command: 'tokens', args: 'indsigt' } as never)).text ?? ''
+  expect(tekst).not.toContain('planlagt')
+  expect(tekst).not.toContain('Planlagt')
 })

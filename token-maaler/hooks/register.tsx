@@ -4,11 +4,13 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { ForbrugGrafik, Graense, KontekstDel } from '../types'
 import { afkort, analyser, etiket, kontekstDele, opsummering } from './analyse'
 import type { Agent, Kald, Trin } from './analyse'
+import { analyserAndet, kodeForbrug, proeverFra, referencePrProcent, vinduer } from './andet'
+import type { Andet, Proeve } from './andet'
 import { beskrivelsesPrompt, dagTekst, dageTekst, datoNoegle, datoTekst, laesLinje, nySamling, opgaveTekst, projekt, projektTekst, renBeskrivelse, visteOpgaver } from './historik'
 import type { HistOpgave, Kilde, Projekt, Samling } from './historik'
-import { alleSamtalerTekst, godeRaadTekst, indsigtTekst, ugedage, ugensSamtalerTekst } from './indsigt'
+import { alleSamtalerTekst, godeRaadTekst, indsigtTekst, MINDST_ANDET, ugedage, ugensSamtalerTekst } from './indsigt'
 import type { Resume } from './indsigt'
-import { KVARTER, median, minutter, saetEnhed, VINDUER } from './enhed'
+import { KVARTER, maalKr, median, minutter, saetEnhed, stoerst, ugeEnhed, VINDUER } from './enhed'
 import { bjaelkeSvg, brugt, kortNavn, maalerSvgStor, maalerTekst, procentTekst, soejlerSvg, soejlerTekst, vistGraenser } from './grafik'
 import type { Maaling } from './enhed'
 import {
@@ -42,7 +44,7 @@ const PANE = 'token-maaler'
 const HISTORIK_VAERKTOEJ = 'mcp__token-maaler__historik'
 const FIRE_MB = 4 * 1024 * 1024
 // Hver samtales resume i $.store; hæv versionen, når reglerne eller resumeet ændres.
-const INDSIGT = 'indsigt:v4:'
+const INDSIGT = 'indsigt:v5:'
 const HENTER = 'Samler indsigt fra alle samtaler …'
 // Hver samtales Dine prompts-forslag i $.store; hæv versionen, når prompterne til modellerne ændres.
 const PROMPTSMART = 'promptsmart:v2:'
@@ -52,14 +54,15 @@ const PROMPTSMART_SAMTALER = 8
 // Indstillingerne fra /config (plugin.json `userConfig`); en ændring dér indlæser modulet igen.
 type Indstillinger = { velkomst: boolean; baand: boolean; beskeder: boolean; beskrivelser: boolean; promptsmart: boolean }
 
-// Målingerne af abonnementets grænser: listepris pr. procentpoint, de seneste ti pr. vindue.
+// Målingerne af abonnementets grænser: listepris pr. procentpoint, de seneste ti pr. vindue. `ref` er
+// forholdet i de perioder af kontoens historik, hvor Code brugte det meste (se andet.ts).
 const KALIBRERING = 'kalibrering:v1'
 type Vindue = keyof typeof VINDUER
-type Kalibrering = Partial<Record<Vindue, Maaling[]>>
+type Kalibrering = Partial<Record<Vindue, Maaling[]>> & { ref?: { seven_day?: number; five_hour?: number; t: number } }
 let indstillinger: Indstillinger = { velkomst: true, baand: true, beskeder: true, beskrivelser: true, promptsmart: true }
 
 const HISTORIK_BESKRIVELSE =
-  "Token usage and cost of this project (this Claude Code session) across its whole history, read from its transcript files: total tokens and cost, every task (each message the user wrote) with its number, day and cost, the active days, and for one task what its cost went to (re-reading the conversation, tool results, thinking, subagents). Use it to answer questions such as 'what did task 7 cost?', 'what did day 2 cost?', 'which tasks were most expensive?' or 'how many days have we worked on this?'. With `alle` it covers all of the user's sessions in all projects instead. Amounts are shown as a share of the user's weekly subscription limit (estimated from their own usage) with Danish kroner in parentheses, or in kroner at list prices before the limits have been measured. Without arguments it returns the project overview and the days."
+  "Token usage and cost of this project (this Claude Code session) across its whole history, read from its transcript files: total tokens and cost, every task (each message the user wrote) with its number, day and cost, the active days, and for one task what its cost went to (re-reading the conversation, tool results, thinking, subagents). Use it to answer questions such as 'what did task 7 cost?', 'what did day 2 cost?', 'which tasks were most expensive?' or 'how many days have we worked on this?'. With `alle` it covers all of the user's sessions in all projects instead, including scheduled tasks (marked 'Planlagt') and, when the Claude app's usage history exists, the part of the weekly limit used outside Claude Code (chat, Cowork etc.). Amounts are shown as a share of the user's weekly subscription limit (estimated from their own usage) with Danish kroner in parentheses, or in kroner at list prices before the limits have been measured. Without arguments it returns the project overview and the days."
 
 type Spand = { trin: Trin[]; kald: Kald[]; agenter: Record<string, Agent> }
 
@@ -331,6 +334,7 @@ const resumeFor = async ($: EngineInterface, s: Session, egen: string): Promise<
     usd: p.usd,
     dage: p.dage.map(d => d.dato),
     kvarterer: p.kvarterer,
+    ...(p.planlagt && { planlagt: p.planlagt }),
     raad: liste.map(r => ({ id: r.id, navn: r.navn, handling: r.handling, kort: r.kort, usd: r.usd })),
   }
   await $.store.set(noegle, { signatur, resume })
@@ -363,20 +367,45 @@ const rydOp = async ($: EngineInterface) => {
   for (const k of await $.store.keys()) if (FORAELDET(k)) await $.store.delete(k)
 }
 
-// Forbindelser og plugins kendes kun for denne session, men følger med i alle nye samtaler.
-const ekstraRaad = async ($: EngineInterface): Promise<Raad[]> => {
+// Rådet om forbrug uden for Code: når mindst en fjerdedel af ugens grænse gik til chat, Cowork m.m. De
+// lange samtaler dér læser hele historikken igen i hver runde, så det er skønnet til en fjerdedel.
+const andetRaad = (andet: Andet | null): Raad[] => {
+  if (!andet || andet.ugeP < 20 || andet.uge < MINDST_ANDET || andet.uge / andet.ugeP < 0.25) return []
+  const usd = andet.uge * andet.prProcent
+  return [
+    {
+      id: 'andet',
+      navn: 'Chat og Cowork',
+      hvorfor: `Ca. ${maalKr(usd)} gik til chat, Cowork m.m. uden for Code.`,
+      handling: 'Start en ny chat til nye emner, og vælg en mindre model til lette spørgsmål.',
+      kort: 'Chat og Cowork',
+      usd: usd / 4,
+      eksempler: [],
+      antal: 'hele kontoen',
+    },
+  ]
+}
+
+// Forbindelser og plugins kendes kun for denne session, men følger med i alle nye samtaler. Forbrug uden
+// for Code kendes kun på kontoen.
+const ekstraRaad = async ($: EngineInterface, andet: Andet | null): Promise<Raad[]> => {
   const p = await hentProjekt($, '')
-  return typeof p === 'string'
-    ? []
-    : raad(
-        { projekt: p, opgaver: p.opgaver.map(o => ({ o, a: analyser(o.raa) })), overhead: await hentOverhead($) },
-        REGLER.filter(r => r.id === 'overhead'),
-      )
+  return [
+    ...(typeof p === 'string'
+      ? []
+      : raad(
+          { projekt: p, opgaver: p.opgaver.map(o => ({ o, a: analyser(o.raa) })), overhead: await hentOverhead($) },
+          REGLER.filter(r => r.id === 'overhead'),
+        )),
+    ...andetRaad(andet),
+  ]
 }
 
 const indsigtFor = async ($: EngineInterface, visuel: boolean): Promise<string[]> => {
   try {
-    return indsigtTekst(await samlResumeer($), await ekstraRaad($), visuel)
+    const resumeer = await samlResumeer($)
+    const andet = await andetFor($, resumeer)
+    return indsigtTekst(resumeer, await ekstraRaad($, andet), visuel, andet)
   } catch (fejl) {
     return [`Kunne ikke samle indsigten: ${fejl instanceof Error ? fejl.message : String(fejl)}`]
   }
@@ -479,7 +508,7 @@ const promptsmartFor = async ($: EngineInterface, visuel: boolean, vis?: (linjer
     try {
       const egen = await $.session.id()
       const valgte = (await alleResumeer($))
-        .filter(({ r }) => r.usd > 0)
+        .filter(({ r }) => r.usd > 0 && !r.planlagt)
         .sort((a, b) => b.r.usd - a.r.usd)
         .slice(0, PROMPTSMART_SAMTALER)
       const fremgang: Fremgang = { samtaler: valgte.length, analyseret: 0, skrevet: 0, klargjort: 0 }
@@ -537,21 +566,90 @@ const tekstFor = async ($: EngineInterface, p: Projekt, visning: Visning | 'dag'
   return projektTekst(p, visuel, await beskriv($, p, visteOpgaver(p)), raadLinje)
 }
 
+// Ugens grænse, som den sidst blev målt: i denne session, ellers fra en tidligere.
+const ugensGraense = async ($: EngineInterface): Promise<Graense | undefined> => {
+  const kendte = await read($, graenser)
+  const gemte = kendte.length ? kendte : ((await $.store.get(SIDSTE_GRAENSER)) as Graense[] | undefined) ?? []
+  return gemte.find(g => g.kind === 'seven_day')
+}
+
+// Claude-appen gemmer kontoens procent af 5-timersgrænsen og ugens grænse hvert kvarter i 30 dage.
+// Filen findes kun, hvor appen er installeret, og læses kun igen, når den har ændret sig.
+const HISTORIK_FIL = 'plan-usage-history.json'
+let proeverHusk: { sti: string; signatur: string; proever: Proeve[] } | null = null
+
+const laesProever = async ($: EngineInterface): Promise<Proeve[]> => {
+  const hjem = (await $.env.get('HOME')) ?? ''
+  const appdata = await $.env.get('APPDATA')
+  const xdg = (await $.env.get('XDG_CONFIG_HOME')) ?? `${hjem}/.config`
+  const stier = [`${hjem}/Library/Application Support/Claude/${HISTORIK_FIL}`, ...(appdata ? [`${appdata}/Claude/${HISTORIK_FIL}`] : []), `${xdg}/Claude/${HISTORIK_FIL}`]
+  for (const sti of stier) {
+    try {
+      const stat = await $.fs.stat(sti)
+      if (stat.kind !== 'file') continue
+      const signatur = `${stat.size}:${stat.mtimeMs}`
+      if (proeverHusk?.sti === sti && proeverHusk.signatur === signatur) return proeverHusk.proever
+      const raa = await $.fs.read(sti)
+      const proever = typeof raa === 'string' ? proeverFra(raa) : []
+      proeverHusk = { sti, signatur, proever }
+      return proever
+    } catch {
+      // Prøv næste sted.
+    }
+  }
+  return []
+}
+
+// Hvor mange dollars listepris ét procentpoint svarer til, når Code er det eneste, der bruger, målt i de
+// perioder af historikken, hvor Code brugte det meste. Chat og Cowork sænker forholdet i andre perioder.
+const referenceFor = async ($: EngineInterface, resumeer: readonly Resume[]): Promise<{ seven_day?: number; five_hour?: number } | null> => {
+  const proever = await laesProever($)
+  if (proever.length === 0) return null
+  const kode = kodeForbrug(resumeer.map(r => r.kvarterer))
+  const uge = referencePrProcent(vinduer(proever, 'sd'), kode) ?? undefined
+  const fem = referencePrProcent(vinduer(proever, 'fh'), kode) ?? undefined
+  return uge === undefined && fem === undefined ? null : { ...(uge !== undefined && { seven_day: uge }), ...(fem !== undefined && { five_hour: fem }) }
+}
+
+// Forbrug uden for Code (chat, Cowork m.m.): kontoens procent mod det, Code kan forklare.
+const andetFor = async ($: EngineInterface, resumeer: readonly Resume[]): Promise<Andet | null> => {
+  try {
+    const c = ugeEnhed()
+    if (!c) return null
+    const proever = await laesProever($)
+    if (proever.length === 0) return null
+    const nu = await $.clock.now()
+    const g = await ugensGraense($)
+    const nulstilles = Date.parse(g?.resetsAt ?? '')
+    const live = g && !Number.isNaN(nulstilles) && nulstilles > nu ? { p: brugt(g, nu), fra: nulstilles - VINDUER.seven_day.ms } : undefined
+    return analyserAndet(proever, kodeForbrug(resumeer.map(r => r.kvarterer)), c, nu, live)
+  } catch {
+    return null
+  }
+}
+
 // Ugen, som ugens grænse tæller den: fra grænsen sidst blev nulstillet til nu, ellers de seneste
 // 7 dage. Forbruget pr. samtale i den uge.
 const ugen = async ($: EngineInterface, resumeer: readonly Resume[]): Promise<{ periode: string; samtaler: { titel: string; usd: number }[] }> => {
   const nu = await $.clock.now()
-  const kendte = await read($, graenser)
-  const gemte = kendte.length ? kendte : ((await $.store.get(SIDSTE_GRAENSER)) as Graense[] | undefined) ?? []
-  const nulstilles = Date.parse(gemte.find(g => g.kind === 'seven_day')?.resetsAt ?? '')
+  const nulstilles = Date.parse((await ugensGraense($))?.resetsAt ?? '')
   const start = nulstilles - VINDUER.seven_day.ms
   const iVinduet = !Number.isNaN(nulstilles) && nulstilles > nu && start <= nu
   const fra = iVinduet ? start : nu - VINDUER.seven_day.ms
   const periode = !iVinduet ? 'de seneste 7 dage' : `siden ${datoTekst(datoNoegle(fra)).split(' ')[0] ?? ''} kl. ${klokken(fra)}`
   const fraKvarter = Math.floor(fra / KVARTER)
-  const samtaler = resumeer
-    .map(r => ({ titel: r.titel, usd: Object.entries(r.kvarterer ?? {}).reduce((n, [k, v]) => (Number(k) >= fraKvarter ? n + v : n), 0) }))
-    .filter(s => s.usd > 0)
+  const samtaler: { titel: string; usd: number }[] = []
+  // Kørsler af den samme planlagte opgave lægges sammen: en opgave, der kører hver dag, er ét forbrug.
+  const planlagte = new Map<string, { usd: number; koersler: number }>()
+  for (const r of resumeer) {
+    const usd = Object.entries(r.kvarterer ?? {}).reduce((n, [k, v]) => (Number(k) >= fraKvarter ? n + v : n), 0)
+    if (usd <= 0) continue
+    if (r.planlagt) {
+      const p = planlagte.get(r.planlagt) ?? { usd: 0, koersler: 0 }
+      planlagte.set(r.planlagt, { usd: p.usd + usd, koersler: p.koersler + 1 })
+    } else samtaler.push({ titel: r.titel, usd })
+  }
+  for (const [navn, p] of planlagte) samtaler.push({ titel: `Planlagt: ${navn} · ${p.koersler === 1 ? '1 kørsel' : `${p.koersler} kørsler`}`, usd: p.usd })
   return { periode, samtaler }
 }
 
@@ -566,14 +664,16 @@ const indsigtVisning = async ($: EngineInterface, visuel = true): Promise<{ graf
   try {
     const resumeer = await samlResumeer($)
     const { periode, samtaler } = await ugen($, resumeer)
+    const nu = await $.clock.now()
+    const andet = await andetFor($, resumeer)
     return {
-      grafik: { dage: ugedage(resumeer, await $.clock.now()) },
+      grafik: { dage: ugedage(resumeer, nu) },
       linjer: [
-        ...alleSamtalerTekst(resumeer),
+        ...alleSamtalerTekst(resumeer, andet),
         '',
-        ...ugensSamtalerTekst(samtaler, periode, visuel),
+        ...ugensSamtalerTekst(samtaler, periode, visuel, andet, nu),
         '',
-        ...godeRaadTekst(resumeer, await ekstraRaad($), visuel),
+        ...godeRaadTekst(resumeer, await ekstraRaad($, andet), visuel),
       ],
     }
   } catch (fejl) {
@@ -655,9 +755,11 @@ const visPromptsmart = async ($: EngineInterface) => {
 // nulstiller dem, og session.start kommer ikke igen.
 let enhedIndlaest = false
 
+// Hvor mange dollars listepris ét procentpoint svarer til: det, der blev målt i sessionerne, eller når
+// kontoens historik viser et højere tal, det (så chat og Cowork ikke gør Codes forbrug dyrere, end det er).
 const indlaesEnhed = async ($: EngineInterface) => {
   const k = ((await $.store.get(KALIBRERING)) ?? {}) as Kalibrering
-  saetEnhed({ uge: median(k.seven_day ?? []), fem: median(k.five_hour ?? []) })
+  saetEnhed({ uge: stoerst(median(k.seven_day ?? []), k.ref?.seven_day), fem: stoerst(median(k.five_hour ?? []), k.ref?.five_hour) })
   enhedIndlaest = true
 }
 
@@ -687,6 +789,8 @@ const kalibrer = async ($: EngineInterface, graenser: readonly Graense[]) => {
       for (const r of resumeer) for (const [n, v] of Object.entries(r.kvarterer ?? {})) if (Number(n) >= start) usd += v
       if (usd > 0) k[g.kind] = [...(k[g.kind] ?? []), { t: nu, usdPrProcent: usd / g.percentUsed }].slice(-10)
     }
+    const ref = await referenceFor($, resumeer)
+    if (ref) k.ref = { ...ref, t: nu }
     await $.store.set(KALIBRERING, k)
     await indlaesEnhed($)
   } catch {

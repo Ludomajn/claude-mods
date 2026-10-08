@@ -46,6 +46,8 @@ export type Samling = {
   // Gange forbrugsgrænsen afviste et kald, og om filen sluttede med en afvisning.
   graense: number
   stoppet: boolean
+  // Navnet på den planlagte opgave, der startede samtalen; tomt for en almindelig samtale.
+  planlagt: string
 }
 
 export type Fejlslags = 'afvist' | 'tilladelse' | 'kommando' | 'timeout' | 'findes ikke' | 'andet'
@@ -95,6 +97,8 @@ export type Projekt = {
   stoppet: { antal: number; usd: number }
   // Forbruget pr. kvarter (nøgle: kvarterets nummer siden 1970), til at måle abonnementets grænser.
   kvarterer: Record<string, number>
+  // Navnet på den planlagte opgave, der startede samtalen; tomt for en almindelig samtale.
+  planlagt: string
 }
 
 const HOVED: Kilde = { id: '', beskrivelse: '', type: '' }
@@ -111,6 +115,7 @@ export const nySamling = (kilde: Kilde = HOVED, session = ''): Samling => ({
   titel: '',
   graense: 0,
   stoppet: false,
+  planlagt: '',
 })
 
 // Listepris for ét kald; cache-skrivninger koster 1,25 × input (5 minutter) eller 2 × (1 time).
@@ -157,6 +162,17 @@ const IKKE_OPGAVE = ['<command-', '<local-command', 'Caveat:']
 
 // Systemets egne beskeder (fx <task-notification>) starter med et mærke, og en ukendt kommando (fx /tokens1)
 // står alene; ingen af dem er en opgave.
+// En planlagt opgave starter sin samtale med opgavens tekst i <scheduled-task name="…" file="…">…</scheduled-task>,
+// efter en fast indledning om, at kørslen er automatisk.
+const PLANLAGT_OPGAVE = /^<scheduled-task name="([^"]+)"[^>]*>/
+
+// Opgavens egen tekst: uden mærket og uden den faste indledning.
+const planlagtPrompt = (tekst: string): string => {
+  const indre = tekst.replace(PLANLAGT_OPGAVE, '').replace(/<\/scheduled-task>\s*$/, '').trim()
+  const afsnit = indre.split(/\n\s*\n/)
+  return (/automated run of a scheduled task/i.test(afsnit[0] ?? '') ? afsnit.slice(1).join('\n\n') : indre).trim()
+}
+
 const erOpgave = (tekst: string) =>
   tekst !== '' && !IKKE_OPGAVE.some(s => tekst.startsWith(s)) && !/^<[a-z][\w-]*>/.test(tekst) && !/^\/[a-z][\w:-]*$/i.test(tekst)
 
@@ -242,8 +258,12 @@ export const laesLinje = (s: Samling, linje: string): void => {
     }
     if (resultater.length || m.isMeta) return
     const tekst = brugerTekst(indhold)
+    const planlagt = PLANLAGT_OPGAVE.exec(tekst)?.[1]
+    if (planlagt && !s.planlagt) s.planlagt = planlagt
     if (tekst.startsWith('[Request interrupted')) s.afbrud.push(t)
-    else if (erOpgave(tekst)) s.beskeder.push({ t, tekst: afkort(tekst, 60), fuld: snit(tekst, TEKST) })
+    else if (erOpgave(tekst)) {
+      s.beskeder.push(planlagt ? { t, tekst: afkort(`Planlagt: ${planlagt}`, 60), fuld: snit(planlagtPrompt(tekst) || tekst, TEKST) } : { t, tekst: afkort(tekst, 60), fuld: snit(tekst, TEKST) })
+    }
   } else if (linje.includes('"type":"custom-title"')) {
     const m = tolk(linje)
     if (typeof m?.customTitle === 'string') s.titel = m.customTitle
@@ -438,6 +458,7 @@ export const projekt = (samlinger: readonly Samling[]): Projekt => {
     graense: samlinger.reduce((n, s) => n + s.graense, 0),
     stoppet: { antal: stoppede.size, usd: kald.filter(k => stoppede.has(k.kilde.id)).reduce((n, k) => n + k.usd, 0) },
     kvarterer,
+    planlagt: samlinger.find(s => s.planlagt)?.planlagt ?? '',
   }
 }
 

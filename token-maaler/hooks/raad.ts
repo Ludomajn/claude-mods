@@ -18,6 +18,8 @@ export type Raad = {
   usd: number
   // Konkrete steder, det skete; kun til Claude via værktøjet.
   eksempler: string[]
+  // Hvem rådet gælder, når det ikke er denne samtale, fx "hele kontoen".
+  antal?: string
 }
 
 export type Del = { navn: string; tokens: number }

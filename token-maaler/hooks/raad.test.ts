@@ -45,6 +45,7 @@ const projekt = (usd: number, subUsd = 0, stoppet = { antal: 0, usd: 0 }): Proje
   graense: stoppet.antal,
   stoppet,
   kvarterer: {},
+  planlagt: '',
 })
 
 // Et modelkald: 100k tokens læst fra cachen og 1.000 skrevet ud.

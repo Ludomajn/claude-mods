@@ -1,7 +1,8 @@
 import { afkortOrd, bjaelke } from './analyse'
 import type { Soejle } from '../types'
+import type { Andet, Periode } from './andet'
 import { KVARTER, maal, maalForklaring, maalKr } from './enhed'
-import { datoNoegle } from './historik'
+import { datoNoegle, datoTekst } from './historik'
 import { beloeb, MEST, raadBlok, restLinje } from './raad'
 import type { Raad } from './raad'
 
@@ -13,6 +14,8 @@ export type Resume = {
   dage: string[]
   // Forbruget pr. kvarter, til at måle abonnementets grænser.
   kvarterer?: Record<string, number>
+  // Navnet på den planlagte opgave, der startede samtalen; fraværende for en almindelig samtale.
+  planlagt?: string
   raad: Pick<Raad, 'id' | 'navn' | 'handling' | 'kort' | 'usd'>[]
 }
 
@@ -43,17 +46,33 @@ export const tvaersRaad = (liste: readonly Resume[], ekstra: readonly Raad[] = [
   }
   return [
     ...[...pr.entries()].map(([id, t]) => ({ id, ...t, hvorfor: hvorFra(t.fra), antal: samtaler(t.fra.length) })),
-    ...ekstra.filter(r => !pr.has(r.id)).map(r => ({ id: r.id, navn: r.navn, handling: r.handling, usd: r.usd, hvorfor: r.hvorfor, antal: 'denne samtale', fra: [] })),
+    ...ekstra.filter(r => !pr.has(r.id)).map(r => ({ id: r.id, navn: r.navn, handling: r.handling, usd: r.usd, hvorfor: r.hvorfor, antal: r.antal ?? 'denne samtale', fra: [] })),
   ].sort((a, b) => b.usd - a.usd)
 }
 
-// Alle samtaler: hvor mange, hvor mange aktive dage og forbruget i alt.
-export const alleSamtalerTekst = (liste: readonly Resume[]): string[] => {
-  if (liste.length === 0) return ['**Alle samtaler**', 'Ingen samtaler med forbrug endnu.']
+// Hvad chat, Cowork m.m. uden for Code mindst skal fylde, før det vises: to procent af ugen.
+export const MINDST_ANDET = 2
+
+// Forbrug uden for Code, omregnet til dollars, så det vises i samme enhed som samtalerne.
+const andetUsd = (andet: Andet, procent: number) => procent * andet.prProcent
+
+// Alle samtaler: hvor mange, hvor mange aktive dage og forbruget i alt. Planlagte opgaver og forbrug
+// uden for Code (chat, Cowork m.m.), som ingen samtale rummer, står på hver sin linje.
+export const alleSamtalerTekst = (liste: readonly Resume[], andet: Andet | null = null): string[] => {
+  const planlagte = liste.filter(s => s.planlagt)
+  const opgaver = new Set(planlagte.map(s => s.planlagt)).size
+  const ekstra = [
+    ...(planlagte.length
+      ? [`Heraf planlagte opgaver: ${planlagte.length === 1 ? '1 kørsel' : `${planlagte.length} kørsler`} af ${opgaver === 1 ? '1 opgave' : `${opgaver} opgaver`} · ${maalKr(sum(planlagte, s => s.usd))}`]
+      : []),
+    ...(andet && andet.alt >= 5 ? [`Chat, Cowork m.m. uden for samtalerne: ${maalKr(andetUsd(andet, andet.alt))} de seneste ${andet.dage} dage`] : []),
+  ]
+  if (liste.length === 0) return ['**Alle samtaler**', 'Ingen samtaler med forbrug endnu.', ...ekstra]
   const dage = new Set(liste.flatMap(s => s.dage)).size
   return [
     '**Alle samtaler**',
     `${samtaler(liste.length)} · ${dage === 1 ? '1 aktiv dag' : `${dage} aktive dage`} · ${maalKr(sum(liste, s => s.usd))} i alt`,
+    ...ekstra,
   ]
 }
 
@@ -68,12 +87,12 @@ export const godeRaadTekst = (liste: readonly Resume[], ekstra: readonly Raad[] 
 }
 
 // Indsigt som tekst til Claudes værktøj: alle samtaler, rådene og de dyreste samtaler nogensinde.
-export const indsigtTekst = (liste: readonly Resume[], ekstra: readonly Raad[] = [], visuel = true): string[] => {
+export const indsigtTekst = (liste: readonly Resume[], ekstra: readonly Raad[] = [], visuel = true, andet: Andet | null = null): string[] => {
   if (liste.length === 0) return ['Ingen samtaler med forbrug endnu.']
   const dyreste = [...liste].sort((a, b) => b.usd - a.usd).slice(0, 3)
   const top = dyreste[0]?.usd ?? 0
   return [
-    ...alleSamtalerTekst(liste),
+    ...alleSamtalerTekst(liste, andet),
     '',
     ...godeRaadTekst(liste, ekstra, visuel),
     '',
@@ -82,19 +101,49 @@ export const indsigtTekst = (liste: readonly Resume[], ekstra: readonly Raad[] =
   ]
 }
 
-// Ugens dyreste samtaler i ugegrænsens vindue, med bjælker i det godkendte format.
-export const ugensSamtalerTekst = (samtaler: readonly { titel: string; usd: number }[], periode: string, visuel = true): string[] => {
+const KLOKKEN = (t: number) => {
+  const d = new Date(t)
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
+// "i dag kl. 13:00-15:30" eller "tir 7. okt kl. 13:00-15:30".
+const periodeTekst = (p: Periode, nu: number): string => {
+  const dag = datoNoegle(p.fra)
+  const igaar = new Date(nu)
+  igaar.setDate(igaar.getDate() - 1)
+  const naar = dag === datoNoegle(nu) ? 'i dag' : dag === datoNoegle(igaar.getTime()) ? 'i går' : datoTekst(dag)
+  return `${naar} kl. ${KLOKKEN(p.fra)}-${KLOKKEN(p.til)}`
+}
+
+// Ugens dyreste samtaler i ugegrænsens vindue, med bjælker i det godkendte format. Forbrug uden for
+// Code (chat, Cowork m.m.) står på sin egen linje efter samtalerne, med de største perioder under.
+export const ugensSamtalerTekst = (
+  samtaler: readonly { titel: string; usd: number }[],
+  periode: string,
+  visuel = true,
+  andet: Andet | null = null,
+  nu = 0,
+): string[] => {
   const overskrift = `**Ugens dyreste samtaler** · ${periode}`
-  if (samtaler.length === 0) return [overskrift, `Intet forbrug ${periode}.`]
+  const uden = andet && andet.uge >= MINDST_ANDET ? andet : null
+  if (samtaler.length === 0 && !uden) return [overskrift, `Intet forbrug ${periode}.`]
   const sorteret = [...samtaler].sort((a, b) => b.usd - a.usd)
-  const top = sorteret[0]?.usd ?? 0
+  const udenUsd = uden ? andetUsd(uden, uden.uge) : 0
+  const top = Math.max(sorteret[0]?.usd ?? 0, udenUsd)
   const vist = sorteret.slice(0, MEST)
   const rest = sorteret.slice(MEST)
+  const bjaelken = (usd: number) => (visuel ? `${bjaelke(top > 0 ? usd / top : 0, 10)} ` : '')
   return [
     overskrift,
-    `I alt ${maalKr(sum(sorteret, s => s.usd))} · ${samtaler.length === 1 ? '1 samtale' : `${samtaler.length} samtaler`}`,
-    ...vist.map(s => `${visuel ? `${bjaelke(top > 0 ? s.usd / top : 0, 10)} ` : ''}${maalKr(s.usd)} · ${afkortOrd(s.titel, 50)}`),
+    ...(samtaler.length ? [`I alt ${maalKr(sum(sorteret, s => s.usd))} · ${samtaler.length === 1 ? '1 samtale' : `${samtaler.length} samtaler`}`] : []),
+    ...vist.map(s => `${bjaelken(s.usd)}${maalKr(s.usd)} · ${afkortOrd(s.titel, 50)}`),
     ...(rest.length ? [`Plus ${rest.length === 1 ? '1 mindre samtale' : `${rest.length} mindre samtaler`}: ${maal(sum(rest, s => s.usd))}.`] : []),
+    ...(uden
+      ? [
+          `${bjaelken(udenUsd)}${maalKr(udenUsd)} · Chat, Cowork m.m. (ikke målt pr. samtale)`,
+          ...uden.perioder.slice(0, 2).map(p => `↳ ${periodeTekst(p, nu)} · ${maalKr(andetUsd(uden, p.procent))}`),
+        ]
+      : []),
   ]
 }
 

@@ -18,6 +18,9 @@ export const saetEnhed = (e: Partial<Enhed>): void => {
   enhed = { ...enhed, ...e }
 }
 
+// Listepris i dollars pr. procentpoint af ugens grænse; null, før grænsen er målt.
+export const ugeEnhed = (): number | null => enhed.uge
+
 const komma = (n: number, d: number) => n.toFixed(d).replace('.', ',')
 
 const tusind = (n: number) => String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, '.')
@@ -72,6 +75,10 @@ export const FODNOTE_MAAL =
 
 // Én måling af en grænse: listepris i vinduet delt med grænsens procent.
 export type Maaling = { t: number; usdPrProcent: number }
+
+// Det største af to mål (null = ukendt): kun hvor en grænse er målt, gælder referencen.
+export const stoerst = (maalt: number | null, reference: number | undefined): number | null =>
+  maalt === null ? null : Math.max(maalt, reference ?? 0)
 
 // Medianen af de seneste målinger, så én skæv måling ikke flytter tallene.
 export const median = (liste: readonly Maaling[]): number | null => {
