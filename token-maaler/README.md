@@ -1,6 +1,6 @@
 # Token-måler til Claude Code
 
-![Token-måleren i båndet over prompten: sidste opgaves andel af 5-timersgrænsen, knapperne Detaljer, Indsigt og Skjul og målere for 5-timersgrænsen og ugens grænse](docs/baand.png)
+![Token-måleren i båndet over prompten](docs/baand.png)
 
 Viser, hvor meget af dine grænser (5 timer og ugen) projektet, hver opgave og hver dag brugte, og hvad der brugte mest. Kroner står som ekstra.
 
@@ -8,9 +8,9 @@ Viser, hvor meget af dine grænser (5 timer og ugen) projektet, hver opgave og h
 - `/tokens 3` udvider opgave 3: hvad forbruget gik til, og hvorfor den blev dyr.
 - `/tokens dage` viser de aktive dage, og `/tokens dag 2` viser dag 2 med dagens dyreste opgaver.
 - `/tokens Kundekrigen` viser en anden session i samme projektmappe (en del af titlen er nok).
-- Efter hver opgave vises et bånd over prompten med den seneste opgaves andel af 5-timersgrænsen, knapperne **Detaljer**, **Indsigt** og **Skjul** og målere for 5-timersgrænsen og ugens grænse (billedet øverst).
+- Over prompten står et bånd, der kun er grafik med titler: bjælker for **Kontekst** (hvor fyldt samtalens vindue er), **5 t** og **Uge** med procenten på, og knapperne **Detaljer**, **Indsigt** og **Skjul**. På 5-timersbjælken er et mørkere stykke yderst på den udfyldte del den sidste opgave; stregen viser, hvor den begyndte. Før den første opgave er der ingen Detaljer og intet stykke, og uden abonnement er der kun kontekstbjælken.
 - Du kan også spørge Claude, fx "hvad kostede opgave 4?" eller "hvor mange dage har vi arbejdet på det her?".
-- **Indsigt** (knappen i båndet og panelet, `/tokens indsigt` eller `/tokens råd alle`) viser på tværs af alle dine samtaler, i denne rækkefølge: grænserne som målere; dit gennemsnitlige forbrug pr. ugedag over hele historikken; alle samtaler (antal, aktive dage, forbrug i alt, heraf planlagte opgaver og det, der brugtes uden for Code i chat og Cowork); ugens dyreste samtaler i ugegrænsens eget vindue (fra den sidst blev nulstillet, ellers de seneste 7 dage), med chat og Cowork på sin egen linje; og gode råd til dig. Graferne tegnes i desktop-appen; i terminalen står de som tekst. I en ny samtale står "Bliv klogere på dit forbrug og dine prompts" over prompten med knapperne **Indsigt** og **Dine prompts**.
+- **Indsigt** (knappen i båndet og panelet, `/tokens indsigt` eller `/tokens råd alle`) viser på tværs af alle dine samtaler, i denne rækkefølge: grænserne som målere; dit gennemsnitlige forbrug pr. ugedag over hele historikken; alle samtaler (antal, aktive dage, forbrug i alt, heraf planlagte opgaver og det, der brugtes uden for Code i chat og Cowork); ugens dyreste samtaler i ugegrænsens eget vindue (fra den sidst blev nulstillet, ellers de seneste 7 dage), med chat og Cowork på sin egen linje; og gode råd til dig. Graferne tegnes i desktop-appen; i terminalen står de som tekst. I en ny samtale står knapperne **Indsigt** og **Dine prompts** sammen med bjælkerne over prompten.
 - `/tokens råd` viser analytikerens råd til at bruge færre tokens, hver med et skøn over, hvad det kunne have sparet. Rådene står i panelet under knappen **Råd**.
 - **Dine prompts** (knappen ved siden af Indsigt, `/tokens prompts` eller `/prompts`) finder steder, hvor din første prompt manglede noget, så du måtte rette bagefter, og foreslår, hvordan prompten kunne have lydt. Tre modeller deler arbejdet: Claude Opus analyserer dine 8 dyreste samtaler, Claude Sonnet skriver den bedre prompt på dit eget niveau (samme sprog og tone, højst halvanden gang så lang), og Claude Haiku skriver forklaringerne. Tallet er, hvad rettelserne bagefter brugte. Forslagene gemmes, så en samtale kun gennemgås igen, når den har fået nye beskeder.
 - Hvert råd står på højst tre linjer: hvad det kunne have sparet, hvad analytikeren så, og hvad du kan gøre.
@@ -48,8 +48,8 @@ I Claude-appen kan du også installere den under **+** ved prompten → **Plugin
 
 Under `/config` står mod'ens indstillinger; alle er slået til fra start:
 
-- **Velkomst i nye samtaler**: "Bliv klogere på dit forbrug og dine prompts" med knapperne Indsigt og Dine prompts.
-- **Bånd efter hver opgave**: målere for 5-timersgrænsen og ugens grænse, hvad den seneste opgave brugte, og knapperne Detaljer og Indsigt i højre side. Rådene står i panelet under Råd.
+- **Velkomst i nye samtaler**: bjælkerne og knapperne Indsigt og Dine prompts, til den første opgave er færdig.
+- **Bånd efter hver opgave**: bjælker for kontekst, 5-timersgrænsen og ugens grænse, den seneste opgave markeret på 5-timersgrænsen, og knapperne Detaljer og Indsigt. Rådene står i panelet under Råd.
 - **Kroner pr. dollar**: kursen, listepriserne omregnes til kroner med (standard 6,5).
 - **Beskeder**: en kort besked efter hver opgave med forbruget og hvor lang tid den tog.
 - **Dine prompts**: knappen Dine prompts ved siden af Indsigt. Gennemgangen sender uddrag af dine samtaler til Opus, Sonnet og Haiku og koster typisk under 7 kr.

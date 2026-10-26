@@ -39,6 +39,9 @@ export const afUgen = (usd: number): string | null => {
   return p >= 100 ? `${komma(p / 100, 1)} ugers grænse` : `${pct(p)} af ugen`
 }
 
+// Hvor mange procent af 5-timersgrænsen et forbrug er; null, før grænsen er målt.
+export const pct5t = (usd: number): number | null => (enhed.fem ? usd / enhed.fem : null)
+
 // "12 % af 5 t"; over et helt vindue "1,8 × 5-timersgrænsen". Null, før grænsen er målt.
 export const af5t = (usd: number): string | null => {
   if (!enhed.fem) return null

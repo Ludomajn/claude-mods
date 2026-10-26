@@ -10,8 +10,8 @@ import { beskrivelsesPrompt, dagTekst, dageTekst, datoNoegle, datoTekst, laesLin
 import type { HistOpgave, Kilde, Projekt, Samling } from './historik'
 import { alleSamtalerTekst, godeRaadTekst, indsigtTekst, MINDST_ANDET, ugedage, ugensSamtalerTekst } from './indsigt'
 import type { Resume } from './indsigt'
-import { KVARTER, maalKr, median, minutter, saetEnhed, stoerst, ugeEnhed, VINDUER } from './enhed'
-import { bjaelkeSvg, brugt, kortNavn, maalerSvgStor, maalerTekst, procentTekst, soejlerSvg, soejlerTekst, vistGraenser } from './grafik'
+import { KVARTER, maalKr, median, minutter, pct5t, saetEnhed, stoerst, ugeEnhed, VINDUER } from './enhed'
+import { bjaelkeSvg, bjaelkeTekst, brugt, kortNavn, maalerSvgStor, maalerTekst, procentTekst, soejlerSvg, soejlerTekst, vistGraenser } from './grafik'
 import type { Maaling } from './enhed'
 import {
   ANALYSE_SYSTEM,
@@ -38,6 +38,8 @@ const paneAntal = atom({ plugin: 'token-maaler', key: 'paneAntal' } as const, 0)
 const paneLinjer = atom({ plugin: 'token-maaler', key: 'paneLinjer' } as const, [])
 const velkomstSkjult = atom({ plugin: 'token-maaler', key: 'velkomstSkjult' } as const, false)
 const graenser = atom({ plugin: 'token-maaler', key: 'graenser' } as const, [])
+// Hvor fyldt kontekstvinduet er, i procent; null, til det første svar har målt det.
+const kontekst = atom({ plugin: 'token-maaler', key: 'kontekst' } as const, null)
 const forbrugGrafik = atom({ plugin: 'token-maaler', key: 'forbrugGrafik' } as const, null)
 
 const PANE = 'token-maaler'
@@ -867,6 +869,7 @@ export const register: Register = (on, options) => {
 
   // Når en grænse flytter sig, måles den igen lidt efter.
   on('session.measure', async ($, e, next) => {
+    if (typeof e.context.percent === 'number') await update($, kontekst, () => e.context.percent ?? null)
     if (e.changed.includes('rateLimits')) {
       const nye = e.rateLimits.map(g => ({ ...g }))
       const vist = vistGraenser(nye)
@@ -1036,47 +1039,35 @@ export const register: Register = (on, options) => {
     const { Box, Button, Text } = el
     const g = await read($, graenser)
     const nu = await $.clock.now()
-    // Målerne for 5-timersgrænsen og ugens grænse efter knapperne: etiketten som tekst og en lille
-    // bjælke med procenten på. I terminalen er bjælken tegn.
-    const vist = vistGraenser(g)
+    // Hver bjælke: titlen som tekst og en lille bjælke med procenten på. I terminalen er bjælken tegn.
+    const kontekstP = await read($, kontekst)
+    const sidste5 = sidste?.usd != null ? (pct5t(sidste.usd) ?? 0) : 0
+    const bjaelker = [
+      ...(kontekstP === null ? [] : [{ navn: 'Kontekst', p: kontekstP, sidste: 0 }]),
+      ...vistGraenser(g).map(x => ({ navn: kortNavn(x), p: brugt(x, nu), sidste: x.kind === 'five_hour' ? sidste5 : 0 })),
+    ]
     const maaler =
-      vist.length === 0 ? null : 'Svg' in el && e.surface !== 'terminal' ? (
+      bjaelker.length === 0 ? null : 'Svg' in el && e.surface !== 'terminal' ? (
         <Box alignItems="center" gap={2} marginLeft={1}>
-          {vist.map(x => {
-            const p = brugt(x, nu)
-            return (
-              <Box key={x.kind} alignItems="center" gap={1}>
-                <Text dimColor>{kortNavn(x)}</Text>
-                <el.Svg {...bjaelkeSvg(p)} alt={`${kortNavn(x)} ${procentTekst(p)}`} />
-              </Box>
-            )
-          })}
+          {bjaelker.map(b => (
+            <Box key={b.navn} alignItems="center" gap={1}>
+              <Text dimColor>{b.navn}</Text>
+              <el.Svg {...bjaelkeSvg(b.p, b.sidste)} alt={`${b.navn} ${procentTekst(b.p)}${b.sidste > 0 ? `, sidste opgave ${procentTekst(b.sidste)}` : ''}`} />
+            </Box>
+          ))}
         </Box>
       ) : (
-        <Text dimColor> {maalerTekst(g, nu)}</Text>
+        <Text dimColor> {bjaelker.map(b => bjaelkeTekst(b.navn, b.p, b.sidste)).join('  ·  ')}</Text>
       )
 
-    // En ny samtale, før den første opgave er målt: en indgang til indsigten i hele forbruget.
-    if (!sidste) {
-      if (!indstillinger.velkomst || (await read($, velkomstSkjult))) return next(e)
-      return (
-        <Box alignItems="center" justifyContent="space-between" width="100%">
-          <Text dimColor>Bliv klogere på dit forbrug og dine prompts</Text>
-          <Box alignItems="center" gap={1}>
-            <Button key="indsigt" label="Indsigt" onPress={() => visIndsigt($)} />
-            {indstillinger.promptsmart && <Button key="promptsmart" label="Dine prompts" onPress={() => visPromptsmart($)} />}
-            <Button key="skjul" label="Skjul" onPress={() => update($, velkomstSkjult, () => true)} />
-            {maaler}
-          </Box>
-        </Box>
-      )
-    }
-    if (!indstillinger.baand || (await read($, skjult))) return next(e)
-
+    // Båndet er kun grafik med titler: bjælker for konteksten, 5-timersgrænsen og ugens grænse, hvor et
+    // lysere stykke på 5-timersgrænsen viser, hvor meget den sidste opgave brugte, og knapperne til højre.
+    // I en ny samtale, før den første opgave er målt, er der ingen Detaljer og ingen opgave at markere.
+    const ny = !sidste
+    if (ny ? !indstillinger.velkomst || (await read($, velkomstSkjult)) : !indstillinger.baand || (await read($, skjult))) return next(e)
     return (
-      <Box alignItems="center" justifyContent="space-between" width="100%">
-        <Text dimColor>Sidste opgave: {opsummering(sidste)}</Text>
-        <Box alignItems="center" gap={1}>
+      <Box alignItems="center" justifyContent="flex-end" gap={1} width="100%">
+        {!ny && (
           <Button
             key="detaljer"
             label="Detaljer"
@@ -1085,10 +1076,11 @@ export const register: Register = (on, options) => {
               await aabnPanel($, '/tokens <nr>')
             }}
           />
-          <Button key="indsigt" label="Indsigt" onPress={() => visIndsigt($)} />
-          <Button key="skjul" label="Skjul" onPress={() => update($, skjult, () => true)} />
-          {maaler}
-        </Box>
+        )}
+        <Button key="indsigt" label="Indsigt" onPress={() => visIndsigt($)} />
+        {ny && indstillinger.promptsmart && <Button key="promptsmart" label="Dine prompts" onPress={() => visPromptsmart($)} />}
+        <Button key="skjul" label="Skjul" onPress={() => (ny ? update($, velkomstSkjult, () => true) : update($, skjult, () => true))} />
+        {maaler}
       </Box>
     )
   })

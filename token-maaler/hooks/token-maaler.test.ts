@@ -97,7 +97,8 @@ test('en live-målt opgave vises i båndet og som besked', async ($, on) => {
 
   for (const surface of ['terminal', 'desktop'] as const) {
     const baand = await $.ui.mount({ plugin: 'token-maaler', surface, component: 'AbovePrompt', props: baandProps } as never)
-    expect((await baand.find({ type: 'Text', text: /^Sidste opgave: 1,95 kr$/ }))?.type).toBe('Text')
+    // Båndet er kun grafik med titler og knapper: ingen sætning om den sidste opgave.
+    expect(await baand.find({ text: /Sidste opgave/ })).toBeUndefined()
     expect(await baand.find({ key: 'detaljer' })).toBeDefined()
     // Rådene står kun i panelet.
     expect(await baand.find({ key: 'raad' })).toBeUndefined()
@@ -108,15 +109,56 @@ test('en live-målt opgave vises i båndet og som besked', async ($, on) => {
   expect(aabnet).toEqual(['token-maaler', 'token-maaler'])
 })
 
+test('båndet er bjælker med titler: kontekst, 5 t og uge, og den sidste opgave er et stykke på 5 t', async ($, on) => {
+  const ur = mock.clock(on)
+  // 0,1 dollars pr. procentpoint af 5-timersgrænsen: opgavens 0,3 dollars er 3 %.
+  mock.store(on, { 'kalibrering:v1': { five_hour: [{ t: 1, usdPrProcent: 0.1 }] } })
+  let usd = 1
+  motor(on, [], [], () => usd)
+  on('session.measure', async (_, e) => ({ changed: e.changed }))
+  await $.turn.start({ text: 'Find og læs den store fil', turnId: 't1' })
+  for await (const _ of $.turn.step({ turnId: 't1', index: 2, model: 'claude-opus-5-5', messageCount: 1 })) {
+    // tøm strømmen
+  }
+  await ur.advance(12_000)
+  usd = 1.3
+  await $.turn.complete({ answer: 'Færdig.', durationMs: 12_000, isAborted: false, turnId: 't1', reason: 'answer' } as never)
+  await $.session.measure({
+    context: { window: 1_000_000, percent: 31 },
+    rateLimits: [
+      { kind: 'five_hour', percentUsed: 23, resetsAt: '2099-01-01T15:40:00.000Z' },
+      { kind: 'seven_day', percentUsed: 8, resetsAt: '2099-01-03T09:00:00.000Z' },
+    ],
+    changed: ['context', 'rateLimits'],
+  } as never)
+
+  const desktop = await $.ui.mount({ plugin: 'token-maaler', surface: 'desktop', component: 'AbovePrompt', props: baandProps } as never)
+  const bjaelker = await desktop.findAll({ type: 'Svg' })
+  expect(bjaelker.map(b => b.props.alt)).toEqual(['Kontekst 31 %', '5 t 23 %, sidste opgave 3 %', 'Uge 8 %'])
+  // Kun 5-timersbjælken har stykket for den sidste opgave, klippet til bjælkens runde ende.
+  expect(bjaelker.map(b => String(b.props.source).includes('<g clip-path='))).toEqual([false, true, false])
+  expect(String(bjaelker[1]?.props.source)).toContain('clip-path="url(#m166-30)"')
+  // Titlerne er den eneste tekst ud over knapperne.
+  for (const titel of ['Kontekst', '5 t', 'Uge']) expect(await desktop.find({ type: 'Text', text: new RegExp(`^${titel}$`) })).toBeDefined()
+  expect(await desktop.find({ text: /Sidste opgave/ })).toBeUndefined()
+  await desktop.unmount()
+
+  const terminal = await $.ui.mount({ plugin: 'token-maaler', surface: 'terminal', component: 'AbovePrompt', props: baandProps } as never)
+  expect(await terminal.find({ type: 'Text', text: /^\s*Kontekst ███░+ 31 %  ·  5 t █▓░+ 23 %  ·  Uge █░+ 8 %$/ })).toBeDefined()
+  await terminal.unmount()
+})
+
 test('en ny samtale viser velkomsten med Indsigt, til Skjul trykkes', async ($, on) => {
   mock.clock(on)
   on('ui.render', async () => ({ type: 'Box', props: {}, children: [] }) as never)
   const baand = await $.ui.mount({ plugin: 'token-maaler', surface: 'desktop', component: 'AbovePrompt', props: baandProps } as never)
   expect(await baand.find({ text: /Sidste opgave/ })).toBeUndefined()
-  expect(await baand.find({ type: 'Text', text: /^Bliv klogere på dit forbrug og dine prompts/ })).toBeDefined()
+  // Før den første opgave er der kun knapper, ingen sætning og ingen Detaljer.
+  expect(await baand.find({ type: 'Text', text: /Bliv klogere/ })).toBeUndefined()
+  expect(await baand.find({ key: 'detaljer' })).toBeUndefined()
   expect((await baand.find({ key: 'indsigt' }))?.props.label).toBe('Indsigt')
   await baand.press({ key: 'skjul' })
-  expect(await baand.find({ type: 'Text', text: /Bliv klogere/ })).toBeUndefined()
+  expect(await baand.find({ key: 'indsigt' })).toBeUndefined()
   await baand.unmount()
 })
 
@@ -124,7 +166,7 @@ test('indstillingerne i /config kan slå velkomsten fra', { options: { velkomst:
   mock.clock(on)
   on('ui.render', async () => ({ type: 'Box', props: {}, children: [] }) as never)
   const baand = await $.ui.mount({ plugin: 'token-maaler', surface: 'desktop', component: 'AbovePrompt', props: baandProps } as never)
-  expect(await baand.find({ type: 'Text', text: /Bliv klogere/ })).toBeUndefined()
+  expect(await baand.find({ key: 'indsigt' })).toBeUndefined()
   await baand.unmount()
 })
 

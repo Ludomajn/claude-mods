@@ -1,6 +1,6 @@
 # claude-mods
 
-![Token-måleren i båndet over prompten: sidste opgaves andel af 5-timersgrænsen, knapperne Detaljer, Indsigt og Skjul og målere for 5-timersgrænsen og ugens grænse](token-maaler/docs/baand.png)
+![Token-måleren i båndet over prompten](token-maaler/docs/baand.png)
 
 Mods til Claude Code.
 
