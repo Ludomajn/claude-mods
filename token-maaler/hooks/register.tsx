@@ -1045,7 +1045,10 @@ export const register: Register = (on, options) => {
     if (bjaelker.length === 0 || !(sidste ? indstillinger.baand : indstillinger.velkomst)) return next(e)
     // Tegningen får bredden i tegn gange en gennemsnitlig tegnbredde; er der mindre plads, skalerer appen den ned.
     return 'Svg' in el && e.surface !== 'terminal' ? (
-      <el.Svg source={baandSvg(bjaelker, Math.round(e.props.bodyColumns * PX_PR_KOLONNE)).source} alt={baandAlt(bjaelker)} />
+      // ponytail: negativ margin skal æde af appens egen luft om båndet; ikke set i appen.
+      <el.Box marginY={-1}>
+        <el.Svg source={baandSvg(bjaelker, Math.round(e.props.bodyColumns * PX_PR_KOLONNE)).source} alt={baandAlt(bjaelker)} />
+      </el.Box>
     ) : (
       <el.Text dimColor>{baandTekst(bjaelker, e.props.bodyColumns)}</el.Text>
     )
