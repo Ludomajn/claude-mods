@@ -60,39 +60,59 @@ const fyld = (p: number) => (p >= 80 ? '#f85149' : p >= 50 ? '#d29922' : CYAN)
 
 const pct = (p: number) => `${Math.round(p)} %`
 
-// Én lille bjælke til båndet med procenten skrevet på bjælken. Etiketten står som almindelig tekst
-// ved siden af, så den flugter med båndets tekst og knapper. `sidste` er den sidste opgaves andel af
-// samme grænse: et mørkere stykke yderst på den udfyldte del med en streg, hvor opgaven begyndte (mørkt,
-// så den hvide procent stadig kan læses).
-export const bjaelkeSvg = (p: number, sidste = 0): Tegning => {
-  const w = Math.max(p > 0 ? 4 : 0, (Math.min(100, p) / 100) * 72)
-  const m = sidste > 0 && w > 0 ? Math.min(w, Math.max(3, (Math.min(100, sidste) / 100) * 72)) : 0
-  // Stykket klippes til bjælkens runde ende; id'et følger tallene, så ens bjælker deler det uden at støde.
-  const id = `m${Math.round(w * 10)}-${Math.round(m * 10)}`
-  return svg(
-    72,
-    14,
-    [
-      // Et mørkere spor end i panelet, så den hvide procent kan læses på lys og mørk baggrund.
-      `<rect x="0" y="0" width="72" height="14" rx="7" fill="rgba(110,110,110,0.55)"/>`,
-      `<rect x="0" y="0" width="${w.toFixed(1)}" height="14" rx="7" fill="${fyld(p)}"/>`,
-      m > 0
-        ? `<clipPath id="${id}"><rect width="${w.toFixed(1)}" height="14" rx="7"/></clipPath><g clip-path="url(#${id})"><rect x="${(w - m).toFixed(1)}" width="${m.toFixed(1)}" height="14" fill="#000000" fill-opacity="0.25"/><rect x="${(w - m - 0.75).toFixed(1)}" width="1.5" height="14" fill="#000000" fill-opacity="0.55"/></g>`
-        : '',
-      `<text x="36" y="10.5" text-anchor="middle" fill="#ffffff" stroke="rgba(0,0,0,0.3)" stroke-width="1.5" paint-order="stroke" font-size="10" font-weight="500" ${SKRIFT}>${pct(p)}</text>`,
-    ].join(''),
-  )
-}
+// Én bjælke i båndet: titel, procent og den sidste opgaves andel af samme grænse (kun 5-timersgrænsen).
+export type Bjaelke = { navn: string; p: number; sidste: number }
 
 export const kortNavn = (g: Graense): string => NAVN[g.kind]?.kort ?? g.kind
 
-export const procentTekst = (p: number): string => pct(p)
+// Titlens plads i pixel i skriftstørrelse 12, med lidt luft til bjælken.
+const titelBredde = (navn: string) => Math.ceil(navn.length * 6.6) + 8
 
-// En bjælke i båndet som tegn, til terminalen: titel, bjælke og procent. Den sidste opgaves stykke er ▓.
-export const bjaelkeTekst = (navn: string, p: number, sidste = 0): string => {
-  const fyldt = p > 0 ? Math.min(10, Math.max(1, Math.round(p / 10))) : 0
-  const m = sidste > 0 ? Math.min(fyldt, Math.max(1, Math.round(sidste / 10))) : 0
-  return `${navn} ${'█'.repeat(fyldt - m)}${'▓'.repeat(m)}${'░'.repeat(10 - fyldt)} ${pct(p)}`
+const MELLEM = 24
+
+// Hele båndet som én tegning, lige så bred som `bredde` pixel: bjælker med titler, lige lange, med procenten
+// skrevet på hver. Den sidste opgave er et mørkere stykke yderst på den udfyldte del med en streg, hvor
+// opgaven begyndte (mørkt, så den hvide procent kan læses). Stykket klippes til bjælkens runde ende.
+export const baandSvg = (bjaelker: readonly Bjaelke[], bredde: number): Tegning => {
+  const bw = Math.max(40, (bredde - (bjaelker.length - 1) * MELLEM - bjaelker.reduce((n, b) => n + titelBredde(b.navn), 0)) / Math.max(1, bjaelker.length))
+  let x = 0
+  const dele = bjaelker.map((b, i) => {
+    const bx = x + titelBredde(b.navn)
+    const tx = x
+    x = bx + bw + MELLEM
+    const w = Math.max(b.p > 0 ? 4 : 0, (Math.min(100, b.p) / 100) * bw)
+    const m = b.sidste > 0 && w > 0 ? Math.min(w, Math.max(3, (Math.min(100, b.sidste) / 100) * bw)) : 0
+    const id = `m${i}`
+    return [
+      `<text x="${tx.toFixed(1)}" y="12" fill="${TEKST}" font-size="12" ${SKRIFT}>${xml(b.navn)}</text>`,
+      // Et mørkere spor end i panelet, så den hvide procent kan læses på lys og mørk baggrund.
+      `<rect x="${bx.toFixed(1)}" y="1" width="${bw.toFixed(1)}" height="14" rx="7" fill="rgba(110,110,110,0.55)"/>`,
+      `<rect x="${bx.toFixed(1)}" y="1" width="${w.toFixed(1)}" height="14" rx="7" fill="${fyld(b.p)}"/>`,
+      m > 0
+        ? `<clipPath id="${id}"><rect x="${bx.toFixed(1)}" y="1" width="${w.toFixed(1)}" height="14" rx="7"/></clipPath><g clip-path="url(#${id})"><rect x="${(bx + w - m).toFixed(1)}" y="1" width="${m.toFixed(1)}" height="14" fill="#000000" fill-opacity="0.25"/><rect x="${(bx + w - m - 0.75).toFixed(1)}" y="1" width="1.5" height="14" fill="#000000" fill-opacity="0.55"/></g>`
+        : '',
+      `<text x="${(bx + bw / 2).toFixed(1)}" y="11.5" text-anchor="middle" fill="#ffffff" stroke="rgba(0,0,0,0.3)" stroke-width="1.5" paint-order="stroke" font-size="10" font-weight="500" ${SKRIFT}>${pct(b.p)}</text>`,
+    ].join('')
+  })
+  return svg(Math.ceil(x - MELLEM), 16, dele.join(''))
+}
+
+// Hvad båndet siger til en læser, der ikke kan se det.
+export const baandAlt = (bjaelker: readonly Bjaelke[]): string =>
+  bjaelker.map(b => `${b.navn} ${pct(b.p)}${b.sidste > 0 ? `, sidste opgave ${pct(b.sidste)}` : ''}`).join('; ')
+
+// Båndet som tegn, til terminalen: bjælkerne lige lange over `kolonner` tegn. Den sidste opgave er ▓.
+export const baandTekst = (bjaelker: readonly Bjaelke[], kolonner: number): string => {
+  const mellem = 3
+  const fast = bjaelker.reduce((n, b) => n + b.navn.length + 2 + 5, 0) + (bjaelker.length - 1) * mellem
+  const celler = Math.max(4, Math.min(60, Math.floor((kolonner - fast) / Math.max(1, bjaelker.length))))
+  return bjaelker
+    .map(b => {
+      const fyldt = b.p > 0 ? Math.min(celler, Math.max(1, Math.round((Math.min(100, b.p) / 100) * celler))) : 0
+      const m = b.sidste > 0 ? Math.min(fyldt, Math.max(1, Math.round((Math.min(100, b.sidste) / 100) * celler))) : 0
+      return `${b.navn} ${'█'.repeat(fyldt - m)}${'▓'.repeat(m)}${'░'.repeat(celler - fyldt)} ${pct(b.p).padStart(5)}`
+    })
+    .join(' '.repeat(mellem))
 }
 
 // Målerne til panelet: én række pr. grænse med hvornår den nulstilles.

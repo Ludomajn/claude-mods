@@ -1,6 +1,6 @@
 {
   "name": "token-maaler",
-  "version": "0.15.0",
+  "version": "0.16.0",
   "description": "Viser, hvor meget af dine grænser (5 timer og ugen) dine samtaler bruger, også planlagte opgaver og forbrug i chat og Cowork, med indsigt på tværs af samtaler, råd til at bruge færre tokens og bedre første prompts",
   "author": {
     "name": "Ludomajn"
@@ -10,13 +10,13 @@
     "velkomst": {
       "type": "boolean",
       "title": "Velkomst i nye samtaler",
-      "description": "Vis bjælkerne og knapperne Indsigt og Dine prompts, indtil den første opgave er færdig.",
+      "description": "Vis bjælkerne over prompten i en ny samtale, når grænserne er målt, til den første opgave er færdig.",
       "default": true
     },
     "baand": {
       "type": "boolean",
       "title": "Bånd efter hver opgave",
-      "description": "Vis over prompten bjælker for kontekst, 5-timersgrænsen og ugens grænse (med den seneste opgave markeret på 5-timersgrænsen) og knapperne Detaljer og Indsigt.",
+      "description": "Vis over prompten bjælker for kontekst, 5-timersgrænsen og ugens grænse efter hver opgave, med den seneste opgave markeret på 5-timersgrænsen.",
       "default": true
     },
     "beskeder": {
@@ -34,7 +34,7 @@
     "promptsmart": {
       "type": "boolean",
       "title": "Dine prompts",
-      "description": "Vis knappen Dine prompts ved siden af Indsigt. Når du trykker, analyserer Claude Opus dine dyreste samtaler, Claude Sonnet skriver bedre første prompts, og Claude Haiku skriver forklaringerne. Sender uddrag af samtalerne til modellerne.",
+      "description": "Slå Dine prompts til: kommandoen /prompts og fanen i panelet. Når du bruger den, analyserer Claude Opus dine dyreste samtaler, Claude Sonnet skriver bedre første prompts, og Claude Haiku skriver forklaringerne. Sender uddrag af samtalerne til modellerne.",
       "default": true
     },
     "kurs": {

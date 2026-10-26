@@ -11,7 +11,8 @@ import type { HistOpgave, Kilde, Projekt, Samling } from './historik'
 import { alleSamtalerTekst, godeRaadTekst, indsigtTekst, MINDST_ANDET, ugedage, ugensSamtalerTekst } from './indsigt'
 import type { Resume } from './indsigt'
 import { KVARTER, maalKr, median, minutter, pct5t, saetEnhed, stoerst, ugeEnhed, VINDUER } from './enhed'
-import { bjaelkeSvg, bjaelkeTekst, brugt, kortNavn, maalerSvgStor, maalerTekst, procentTekst, soejlerSvg, soejlerTekst, vistGraenser } from './grafik'
+import { baandAlt, baandSvg, baandTekst, brugt, kortNavn, maalerSvgStor, maalerTekst, soejlerSvg, soejlerTekst, vistGraenser } from './grafik'
+import type { Bjaelke } from './grafik'
 import type { Maaling } from './enhed'
 import {
   ANALYSE_SYSTEM,
@@ -31,18 +32,18 @@ import { beloeb, kortRaad, overheadFra, raad, raadTekst, REGLER } from './raad'
 import type { Grundlag, Overhead, Raad } from './raad'
 
 const opgaver = atom({ plugin: 'token-maaler', key: 'opgaver' } as const, [])
-const skjult = atom({ plugin: 'token-maaler', key: 'skjult' } as const, false)
 const paneVisning = atom({ plugin: 'token-maaler', key: 'paneVisning' } as const, 'projekt')
 const paneNr = atom({ plugin: 'token-maaler', key: 'paneNr' } as const, null)
 const paneAntal = atom({ plugin: 'token-maaler', key: 'paneAntal' } as const, 0)
 const paneLinjer = atom({ plugin: 'token-maaler', key: 'paneLinjer' } as const, [])
-const velkomstSkjult = atom({ plugin: 'token-maaler', key: 'velkomstSkjult' } as const, false)
 const graenser = atom({ plugin: 'token-maaler', key: 'graenser' } as const, [])
 // Hvor fyldt kontekstvinduet er, i procent; null, til det første svar har målt det.
 const kontekst = atom({ plugin: 'token-maaler', key: 'kontekst' } as const, null)
 const forbrugGrafik = atom({ plugin: 'token-maaler', key: 'forbrugGrafik' } as const, null)
 
 const PANE = 'token-maaler'
+// Pixel pr. tegn i appens kodeskrift, til at gøre båndets tegning så bred som båndet.
+const PX_PR_KOLONNE = 7.5
 const HISTORIK_VAERKTOEJ = 'mcp__token-maaler__historik'
 const FIRE_MB = 4 * 1024 * 1024
 // Hver samtales resume i $.store; hæv versionen, når reglerne eller resumeet ændres.
@@ -735,22 +736,16 @@ const visPanel = async ($: EngineInterface, visning: Visning, nr: number | null)
   await update($, paneAntal, () => (typeof p === 'string' ? 0 : p.opgaver.length))
 }
 
-const aabnPanel = async ($: EngineInterface, kommando: string) => {
-  const aabnet = await $.ui.open({ id: PANE, title: 'Token-forbrug' })
-  if (!aabnet.isPlaced) $.ui.toast(`Panelet kan ikke vises her. Skriv ${kommando}.`)
-}
+// Båndet har ingen knapper: kommandoerne åbner panelet, hvor appen kan vise det, og ellers står svaret som tekst.
+const iAppen = async ($: EngineInterface) => (await $.session.surfaces().catch(() => [])).some(s => s !== 'terminal')
 
-// Panelet åbnes med det samme og fyldes, når indsigten er samlet.
-const visIndsigt = async ($: EngineInterface) => {
-  const klar = visPanel($, 'indsigt', null)
-  await aabnPanel($, '/tokens indsigt')
+// Åbner panelet med det samme og fylder det, når visningen er samlet. Falsk, hvor panelet ikke kan vises.
+const iPanelet = async ($: EngineInterface, visning: Visning, nr: number | null = null): Promise<boolean> => {
+  if (!(await iAppen($))) return false
+  const klar = visPanel($, visning, nr)
+  const placeret = (await $.ui.open({ id: PANE, title: 'Token-forbrug' })).isPlaced
   await klar
-}
-
-const visPromptsmart = async ($: EngineInterface) => {
-  const klar = visPanel($, 'promptsmart', null)
-  await aabnPanel($, '/tokens prompts')
-  await klar
+  return placeret
 }
 
 // Om grænsernes målinger er læst ind i dette indlæste modul; en ny indlæsning (fx efter /config)
@@ -1002,12 +997,13 @@ export const register: Register = (on, options) => {
   on('command.run', { command: 'tokens' }, async ($, e) => {
     const ord = e.args.trim().split(/\s+/).filter(Boolean)
     const [foerste = '', ...rest] = ord
-    await update($, skjult, () => false)
     await sikrEnhed($)
     if (foerste === 'forbrug' || foerste === 'indsigt' || ((foerste === 'råd' || foerste === 'raad') && rest.join(' ') === 'alle')) {
-      return { text: (await forbrugTekst($)).join('\n') }
+      return (await iPanelet($, 'indsigt')) ? {} : { text: (await forbrugTekst($)).join('\n') }
     }
-    if (['prompts', 'promptsmart'].includes(foerste.toLowerCase())) return { text: (await promptsmartFor($, true)).join('\n') }
+    if (['prompts', 'promptsmart'].includes(foerste.toLowerCase())) {
+      return (await iPanelet($, 'promptsmart')) ? {} : { text: (await promptsmartFor($, true)).join('\n') }
+    }
     if (foerste === 'dag') {
       const nr = Number.parseInt(rest[0] ?? '', 10)
       if (Number.isNaN(nr)) return { text: 'Skriv fx /tokens dag 2.' }
@@ -1022,13 +1018,14 @@ export const register: Register = (on, options) => {
         : /^\d+$/.test(foerste)
           ? ['opgave', Number(foerste), rest.join(' ')]
           : ['projekt', null, ord.join(' ')]
+    if (visning === 'opgave' && soeg === '' && (await iPanelet($, 'opgave', nr))) return {}
     const p = await hentProjekt($, soeg)
     return { text: typeof p === 'string' ? p : (await tekstFor($, p, visning, nr, true)).join('\n') }
   })
 
   on('command.run', { command: 'prompts' }, async $ => {
     await sikrEnhed($)
-    return { text: (await promptsmartFor($, true)).join('\n') }
+    return (await iPanelet($, 'promptsmart')) ? {} : { text: (await promptsmartFor($, true)).join('\n') }
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
@@ -1036,52 +1033,21 @@ export const register: Register = (on, options) => {
     await sikrEnhed($)
     const sidste = (await read($, opgaver)).at(-1)
     const el = $.ui.resolve(e)
-    const { Box, Button, Text } = el
-    const g = await read($, graenser)
     const nu = await $.clock.now()
-    // Hver bjælke: titlen som tekst og en lille bjælke med procenten på. I terminalen er bjælken tegn.
+    // Båndet er kun bjælker med titler over hele bredden: konteksten, 5-timersgrænsen og ugens grænse. Et
+    // mørkere stykke på 5-timersgrænsen er den sidste opgave. Før den første opgave er der intet stykke.
     const kontekstP = await read($, kontekst)
     const sidste5 = sidste?.usd != null ? (pct5t(sidste.usd) ?? 0) : 0
-    const bjaelker = [
+    const bjaelker: Bjaelke[] = [
       ...(kontekstP === null ? [] : [{ navn: 'Kontekst', p: kontekstP, sidste: 0 }]),
-      ...vistGraenser(g).map(x => ({ navn: kortNavn(x), p: brugt(x, nu), sidste: x.kind === 'five_hour' ? sidste5 : 0 })),
+      ...vistGraenser(await read($, graenser)).map(x => ({ navn: kortNavn(x), p: brugt(x, nu), sidste: x.kind === 'five_hour' ? sidste5 : 0 })),
     ]
-    const maaler =
-      bjaelker.length === 0 ? null : 'Svg' in el && e.surface !== 'terminal' ? (
-        <Box alignItems="center" gap={2} marginLeft={1}>
-          {bjaelker.map(b => (
-            <Box key={b.navn} alignItems="center" gap={1}>
-              <Text dimColor>{b.navn}</Text>
-              <el.Svg {...bjaelkeSvg(b.p, b.sidste)} alt={`${b.navn} ${procentTekst(b.p)}${b.sidste > 0 ? `, sidste opgave ${procentTekst(b.sidste)}` : ''}`} />
-            </Box>
-          ))}
-        </Box>
-      ) : (
-        <Text dimColor> {bjaelker.map(b => bjaelkeTekst(b.navn, b.p, b.sidste)).join('  ·  ')}</Text>
-      )
-
-    // Båndet er kun grafik med titler: bjælker for konteksten, 5-timersgrænsen og ugens grænse, hvor et
-    // lysere stykke på 5-timersgrænsen viser, hvor meget den sidste opgave brugte, og knapperne til højre.
-    // I en ny samtale, før den første opgave er målt, er der ingen Detaljer og ingen opgave at markere.
-    const ny = !sidste
-    if (ny ? !indstillinger.velkomst || (await read($, velkomstSkjult)) : !indstillinger.baand || (await read($, skjult))) return next(e)
-    return (
-      <Box alignItems="center" justifyContent="flex-end" gap={1} width="100%">
-        {!ny && (
-          <Button
-            key="detaljer"
-            label="Detaljer"
-            onPress={async () => {
-              await visPanel($, 'opgave', null)
-              await aabnPanel($, '/tokens <nr>')
-            }}
-          />
-        )}
-        <Button key="indsigt" label="Indsigt" onPress={() => visIndsigt($)} />
-        {ny && indstillinger.promptsmart && <Button key="promptsmart" label="Dine prompts" onPress={() => visPromptsmart($)} />}
-        <Button key="skjul" label="Skjul" onPress={() => (ny ? update($, velkomstSkjult, () => true) : update($, skjult, () => true))} />
-        {maaler}
-      </Box>
+    if (bjaelker.length === 0 || !(sidste ? indstillinger.baand : indstillinger.velkomst)) return next(e)
+    // Tegningen får bredden i tegn gange en gennemsnitlig tegnbredde; er der mindre plads, skalerer appen den ned.
+    return 'Svg' in el && e.surface !== 'terminal' ? (
+      <el.Svg source={baandSvg(bjaelker, Math.round(e.props.bodyColumns * PX_PR_KOLONNE)).source} alt={baandAlt(bjaelker)} />
+    ) : (
+      <el.Text dimColor>{baandTekst(bjaelker, e.props.bodyColumns)}</el.Text>
     )
   })
 

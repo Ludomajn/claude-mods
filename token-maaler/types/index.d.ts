@@ -55,8 +55,6 @@ declare module 'claude-code' {
   interface PluginState {
     'token-maaler': {
       opgaver: Opgave[]
-      skjult: boolean
-      velkomstSkjult: boolean
       paneVisning: 'projekt' | 'opgave' | 'dage' | 'raad' | 'promptsmart' | 'indsigt'
       paneNr: number | null
       paneAntal: number

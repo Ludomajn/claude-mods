@@ -1,4 +1,5 @@
 import { expect, mock, test } from 'claude-code/testing'
+import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
 const brug = (input: number, output: number, cacheLaes: number, cacheSkriv: number, model = 'claude-opus-5-5') => ({
@@ -64,12 +65,13 @@ const motor = (on: On, toasts: string[], aabnet: string[], usd: () => number) =>
 const baandProps = { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 120, scroll: { offset: 0, bodyRows: 10 }, view: {} }
 const panelProps = { title: 'Token-forbrug', isFocused: false, bodyColumns: 100, placement: 'inline', scroll: { offset: 0, bodyRows: 40 }, view: {} }
 
-test('en live-målt opgave vises i båndet og som besked', async ($, on) => {
+test('en live-målt opgave giver en besked, og båndet har hverken knapper eller sætninger', async ($, on) => {
   const ur = mock.clock(on)
   let usd = 1
   const toasts: string[] = []
   const aabnet: string[] = []
   motor(on, toasts, aabnet, () => usd)
+  on('ui.render', async () => ({ type: 'Box', props: {}, children: [] }) as never)
 
   const vaerktoej = $.tool.call as unknown as (input: Record<string, unknown>) => Promise<unknown>
   const trin = async (e: { turnId: string; index: number; model: string; agentId?: string }) => {
@@ -95,24 +97,20 @@ test('en live-målt opgave vises i båndet og som besked', async ($, on) => {
 
   expect(toasts).toEqual([expect.stringMatching(/^Opgaven brugte 1,95 kr · (<1|\d+) min$/)])
 
+  // Uden målte grænser og uden kontekst er der intet at tegne, og båndet har aldrig knapper eller sætninger.
   for (const surface of ['terminal', 'desktop'] as const) {
     const baand = await $.ui.mount({ plugin: 'token-maaler', surface, component: 'AbovePrompt', props: baandProps } as never)
-    // Båndet er kun grafik med titler og knapper: ingen sætning om den sidste opgave.
+    expect(await baand.find({ type: 'Svg' })).toBeUndefined()
+    expect(await baand.find({ type: 'Button' })).toBeUndefined()
     expect(await baand.find({ text: /Sidste opgave/ })).toBeUndefined()
-    expect(await baand.find({ key: 'detaljer' })).toBeDefined()
-    // Rådene står kun i panelet.
-    expect(await baand.find({ key: 'raad' })).toBeUndefined()
-    expect(await baand.find({ key: 'projekt' })).toBeUndefined()
-    await baand.press({ key: 'indsigt' })
     await baand.unmount()
   }
-  expect(aabnet).toEqual(['token-maaler', 'token-maaler'])
+  expect(aabnet).toEqual([])
 })
 
-test('båndet er bjælker med titler: kontekst, 5 t og uge, og den sidste opgave er et stykke på 5 t', async ($, on) => {
-  const ur = mock.clock(on)
-  // 0,1 dollars pr. procentpoint af 5-timersgrænsen: opgavens 0,3 dollars er 3 %.
-  mock.store(on, { 'kalibrering:v1': { five_hour: [{ t: 1, usdPrProcent: 0.1 }] } })
+// En opgave til 0,3 dollars i en session, hvor grænserne og konteksten er målt; 0,1 dollars pr. procentpoint
+// af 5-timersgrænsen gør opgaven til 3 %.
+const medOpgave = async ($: Engine, on: On, ur: ReturnType<typeof mock.clock>) => {
   let usd = 1
   motor(on, [], [], () => usd)
   on('session.measure', async (_, e) => ({ changed: e.changed }))
@@ -131,42 +129,66 @@ test('båndet er bjælker med titler: kontekst, 5 t og uge, og den sidste opgave
     ],
     changed: ['context', 'rateLimits'],
   } as never)
+}
+
+test('båndet er kun bjælker med titler over hele bredden, og den sidste opgave er et stykke på 5 t', async ($, on) => {
+  const ur = mock.clock(on)
+  mock.store(on, { 'kalibrering:v1': { five_hour: [{ t: 1, usdPrProcent: 0.1 }] } })
+  await medOpgave($, on, ur)
 
   const desktop = await $.ui.mount({ plugin: 'token-maaler', surface: 'desktop', component: 'AbovePrompt', props: baandProps } as never)
-  const bjaelker = await desktop.findAll({ type: 'Svg' })
-  expect(bjaelker.map(b => b.props.alt)).toEqual(['Kontekst 31 %', '5 t 23 %, sidste opgave 3 %', 'Uge 8 %'])
-  // Kun 5-timersbjælken har stykket for den sidste opgave, klippet til bjælkens runde ende.
-  expect(bjaelker.map(b => String(b.props.source).includes('<g clip-path='))).toEqual([false, true, false])
-  expect(String(bjaelker[1]?.props.source)).toContain('clip-path="url(#m166-30)"')
-  // Titlerne er den eneste tekst ud over knapperne.
-  for (const titel of ['Kontekst', '5 t', 'Uge']) expect(await desktop.find({ type: 'Text', text: new RegExp(`^${titel}$`) })).toBeDefined()
-  expect(await desktop.find({ text: /Sidste opgave/ })).toBeUndefined()
+  // Én tegning med alt: ingen knapper, ingen tekst ved siden af.
+  const tegninger = await desktop.findAll({ type: 'Svg' })
+  expect(tegninger.map(b => b.props.alt)).toEqual(['Kontekst 31 %; 5 t 23 %, sidste opgave 3 %; Uge 8 %'])
+  expect(await desktop.find({ type: 'Button' })).toBeUndefined()
+  expect(await desktop.find({ type: 'Text' })).toBeUndefined()
+  const kilde = String(tegninger[0]?.props.source)
+  // 120 tegn gange 7,5 pixel; titlerne og procenterne står i tegningen, og kun 5-timersbjælken har stykket.
+  expect(kilde).toContain('width="900" height="16"')
+  for (const tekst of ['Kontekst', '5 t', 'Uge', '31 %', '23 %', '8 %']) expect(kilde).toContain(`>${tekst}</text>`)
+  expect(kilde.match(/<g clip-path=/g)).toHaveLength(1)
   await desktop.unmount()
 
+  // I terminalen er bjælkerne tegn, lige lange over bredden; ▓ er den sidste opgave.
   const terminal = await $.ui.mount({ plugin: 'token-maaler', surface: 'terminal', component: 'AbovePrompt', props: baandProps } as never)
-  expect(await terminal.find({ type: 'Text', text: /^\s*Kontekst ███░+ 31 %  ·  5 t █▓░+ 23 %  ·  Uge █░+ 8 %$/ })).toBeDefined()
+  expect(await terminal.find({ type: 'Text', text: /^ ?Kontekst [█░]{26} +31 % +5 t █{5}▓░{20} +23 % +Uge [█░]{26} +8 %$/ })).toBeDefined()
   await terminal.unmount()
 })
 
-test('en ny samtale viser velkomsten med Indsigt, til Skjul trykkes', async ($, on) => {
-  mock.clock(on)
+test('indstillingen Bånd efter hver opgave kan slås fra', { options: { baand: false } }, async ($, on) => {
+  const ur = mock.clock(on)
+  mock.store(on, { 'kalibrering:v1': { five_hour: [{ t: 1, usdPrProcent: 0.1 }] } })
   on('ui.render', async () => ({ type: 'Box', props: {}, children: [] }) as never)
+  await medOpgave($, on, ur)
   const baand = await $.ui.mount({ plugin: 'token-maaler', surface: 'desktop', component: 'AbovePrompt', props: baandProps } as never)
-  expect(await baand.find({ text: /Sidste opgave/ })).toBeUndefined()
-  // Før den første opgave er der kun knapper, ingen sætning og ingen Detaljer.
-  expect(await baand.find({ type: 'Text', text: /Bliv klogere/ })).toBeUndefined()
-  expect(await baand.find({ key: 'detaljer' })).toBeUndefined()
-  expect((await baand.find({ key: 'indsigt' }))?.props.label).toBe('Indsigt')
-  await baand.press({ key: 'skjul' })
-  expect(await baand.find({ key: 'indsigt' })).toBeUndefined()
+  expect(await baand.find({ type: 'Svg' })).toBeUndefined()
+  await baand.unmount()
+})
+
+test('i en ny samtale står bjælkerne, når grænserne er målt, uden stykke for en opgave', async ($, on) => {
+  mock.clock(on)
+  mock.store(on)
+  on('session.measure', async (_, e) => ({ changed: e.changed }))
+  on('ui.render', async () => ({ type: 'Box', props: {}, children: [] }) as never)
+  const mount = () => $.ui.mount({ plugin: 'token-maaler', surface: 'desktop', component: 'AbovePrompt', props: baandProps } as never)
+  const foer = await mount()
+  expect(await foer.find({ type: 'Svg' })).toBeUndefined()
+  await foer.unmount()
+  await $.session.measure({ context: { window: 1_000_000 }, rateLimits: [{ kind: 'five_hour', percentUsed: 23, resetsAt: '2099-01-01T15:40:00.000Z' }], changed: ['rateLimits'] } as never)
+  const baand = await mount()
+  expect((await baand.find({ type: 'Svg' }))?.props.alt).toBe('5 t 23 %')
+  expect(await baand.find({ type: 'Button' })).toBeUndefined()
   await baand.unmount()
 })
 
 test('indstillingerne i /config kan slå velkomsten fra', { options: { velkomst: false } }, async ($, on) => {
   mock.clock(on)
+  mock.store(on)
+  on('session.measure', async (_, e) => ({ changed: e.changed }))
   on('ui.render', async () => ({ type: 'Box', props: {}, children: [] }) as never)
+  await $.session.measure({ context: { window: 1_000_000 }, rateLimits: [{ kind: 'five_hour', percentUsed: 23, resetsAt: '2099-01-01T15:40:00.000Z' }], changed: ['rateLimits'] } as never)
   const baand = await $.ui.mount({ plugin: 'token-maaler', surface: 'desktop', component: 'AbovePrompt', props: baandProps } as never)
-  expect(await baand.find({ key: 'indsigt' })).toBeUndefined()
+  expect(await baand.find({ type: 'Svg' })).toBeUndefined()
   await baand.unmount()
 })
 
@@ -207,6 +229,8 @@ test('/tokens råd alle samler alle samtaler i alle projektmapper og husker resu
     aabnet.push(e.id)
     return { value: { isPlaced: true } as never }
   })
+  let flade: 'terminal' | 'desktop' = 'terminal'
+  on('session.surfaces', async () => ({ value: [flade] as never }))
 
   const tekst = (await $.command.run({ command: 'tokens', args: 'råd alle' } as never)).text ?? ''
   const linjer = tekst.split('\n')
@@ -241,9 +265,9 @@ test('/tokens råd alle samler alle samtaler i alle projektmapper og husker resu
   expect(svar).toContain('**4,39 kr · Lang samtale** · 1 samtale\nI Bæverspil (4,39 kr).')
   expect(svar).not.toContain('█')
 
-  const baand = await $.ui.mount({ plugin: 'token-maaler', surface: 'desktop', component: 'AbovePrompt', props: baandProps } as never)
-  await baand.press({ key: 'indsigt' })
-  await baand.unmount()
+  // I appen åbner kommandoen panelet i stedet for at skrive teksten; i terminalen og uden en flade står den som tekst.
+  flade = 'desktop'
+  expect((await $.command.run({ command: 'tokens', args: 'indsigt' } as never)).text).toBeUndefined()
   expect(aabnet).toEqual(['token-maaler'])
   const panel = await $.ui.mount({ plugin: 'token-maaler', surface: 'desktop', component: 'Pane', requestId: 'token-maaler', props: panelProps } as never)
   // Overskriften er fed, forklaringen under et råd dæmpet, handlingen grøn og kommandoen i farve.
@@ -289,6 +313,13 @@ test('historikken: /tokens viser projektet, /tokens <nr> en opgave, og panelet o
     return { value: { code: 0, signal: null } }
   })
   on('ui.toast', async () => ({ value: undefined }))
+  const aabnet: string[] = []
+  on('ui.open', async (_, e) => {
+    aabnet.push(e.id)
+    return { value: { isPlaced: true } as never }
+  })
+  let flade: 'terminal' | 'desktop' = 'terminal'
+  on('session.surfaces', async () => ({ value: [flade] as never }))
   mock.store(on)
   // Haiku beskriver opgaverne; hvert kald tælles, så det kan ses, at beskrivelserne gemmes.
   const beskrevet: string[] = []
@@ -328,7 +359,13 @@ test('historikken: /tokens viser projektet, /tokens <nr> en opgave, og panelet o
   expect(svarAlt).toContain('hele projektet')
   expect(svarAlt).toContain('2 aktive dage')
 
+  // I appen åbner /tokens <nr> panelet med opgavens detaljer i stedet for at skrive dem; ud over et tal står svaret som tekst.
+  flade = 'desktop'
+  expect(await kommando('1')).toBe('')
+  expect(await kommando('dage')).toContain('2 aktive dage')
+  expect(aabnet).toEqual(['token-maaler'])
   const panel = await $.ui.mount({ plugin: 'token-maaler', surface: 'desktop', component: 'Pane', requestId: 'token-maaler', props: panelProps } as never)
+  expect(await panel.find({ type: 'Text', text: /Opgave 1 · dag 1 ·/ })).toBeDefined()
   expect(await panel.find({ key: 'projekt' })).toBeUndefined()
   await panel.press({ key: 'indsigt' })
   // Forbrug: graferne øverst og ugens dyreste samtaler under dem.
@@ -358,7 +395,7 @@ const langTranscript = [
   ),
 ].join('\n')
 
-test('rådene står i panelet og /tokens råd, ikke i båndet eller som besked', async ($, on) => {
+test('rådene står i panelet og /tokens råd, ikke som besked', async ($, on) => {
   const ur = mock.clock(on)
   mock.env(on, { HOME: '/h' })
   mock.store(on)
@@ -379,9 +416,6 @@ test('rådene står i panelet og /tokens råd, ikke i båndet eller som besked',
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' } as never)
   await ur.advance(3_000)
   expect(toasts.filter(t => t.startsWith('Råd:'))).toEqual([])
-  const baand = await $.ui.mount({ plugin: 'token-maaler', surface: 'desktop', component: 'AbovePrompt', props: baandProps } as never)
-  expect(await baand.find({ key: 'raad' })).toBeUndefined()
-  await baand.unmount()
 
   const tekst = (await $.command.run({ command: 'tokens', args: 'råd' } as never)).text ?? ''
   expect(tekst).toContain('**Råd til at bruge færre tokens**')
@@ -397,6 +431,8 @@ test('Dine prompts: Opus finder rettelserne, Sonnet skriver prompten, Haiku fork
   mock.store(on)
   toMapper(on, new Set())
   on('ui.open', async () => ({ value: { isPlaced: true } as never }))
+  let flade: 'terminal' | 'desktop' = 'terminal'
+  on('session.surfaces', async () => ({ value: [flade] as never }))
   const kaldt: string[] = []
   on('model.complete', async (_, e) => {
     kaldt.push(`${e.model}:${e.effort ?? ''}`)
@@ -430,10 +466,10 @@ test('Dine prompts: Opus finder rettelserne, Sonnet skriver prompten, Haiku fork
   await $.command.run({ command: 'prompts', args: '' } as never)
   expect(kaldt).toHaveLength(4)
 
-  const baand = await $.ui.mount({ plugin: 'token-maaler', surface: 'desktop', component: 'AbovePrompt', props: baandProps } as never)
-  expect((await baand.find({ key: 'promptsmart' }))?.props.label).toBe('Dine prompts')
-  await baand.press({ key: 'promptsmart' })
-  await baand.unmount()
+  // I appen åbner /prompts panelet med de gemte forslag.
+  flade = 'desktop'
+  expect((await $.command.run({ command: 'prompts', args: '' } as never)).text).toBeUndefined()
+  expect(kaldt).toHaveLength(4)
   const panel = await $.ui.mount({ plugin: 'token-maaler', surface: 'desktop', component: 'Pane', requestId: 'token-maaler', props: panelProps } as never)
   expect((await panel.find({ type: 'Text', text: /^Dine prompts$/ }))?.props.bold).toBe(true)
   expect((await panel.find({ type: 'Text', text: /^Du skrev: «Byg forsiden»/ }))?.props.dimColor).toBe(true)
@@ -444,11 +480,10 @@ test('Dine prompts: Opus finder rettelserne, Sonnet skriver prompten, Haiku fork
 
 test('Dine prompts kan slås fra i /config', { options: { promptsmart: false } }, async ($, on) => {
   mock.clock(on)
-  on('ui.render', async () => ({ type: 'Box', props: {}, children: [] }) as never)
-  const baand = await $.ui.mount({ plugin: 'token-maaler', surface: 'desktop', component: 'AbovePrompt', props: baandProps } as never)
-  expect(await baand.find({ key: 'indsigt' })).toBeDefined()
-  expect(await baand.find({ key: 'promptsmart' })).toBeUndefined()
-  await baand.unmount()
+  const panel = await $.ui.mount({ plugin: 'token-maaler', surface: 'desktop', component: 'Pane', requestId: 'token-maaler', props: panelProps } as never)
+  expect(await panel.find({ key: 'indsigt' })).toBeDefined()
+  expect(await panel.find({ key: 'promptsmart' })).toBeUndefined()
+  await panel.unmount()
 })
 
 test('Dine prompts gemmer intet og siger det, når modellerne ikke svarer', async ($, on) => {
@@ -509,16 +544,15 @@ test('båndet viser 5-timersgrænsen og ugens grænse som målere: en graf på d
   } as never)
 
   const desktop = await $.ui.mount({ plugin: 'token-maaler', surface: 'desktop', component: 'AbovePrompt', props: baandProps } as never)
-  // Hver måler: etiketten som tekst og en lille bjælke i fast størrelse med procenten på.
-  const bjaelker = await desktop.findAll({ type: 'Svg' })
-  expect(bjaelker.map(b => [b.props.width, b.props.height, b.props.isInteractive])).toEqual([[72, 14, undefined], [72, 14, undefined]])
-  expect(bjaelker.map(b => b.props.alt)).toEqual(['5 t 23 %', 'Uge 8 %'])
-  expect(String(bjaelker[0]?.props.source)).toContain('>23 %</text>')
+  // Bjælkerne er én tegning i fast højde, uden fast bredde og uden ramme om en interaktiv tegning, med procenten på hver.
+  const tegninger = await desktop.findAll({ type: 'Svg' })
+  expect(tegninger.map(b => [b.props.width, b.props.height, b.props.isInteractive, b.props.alt])).toEqual([[undefined, undefined, undefined, '5 t 23 %; Uge 8 %']])
+  expect(String(tegninger[0]?.props.source)).toContain('>23 %</text>')
   expect(await desktop.find({ type: 'Text', text: /^23 %$/ })).toBeUndefined()
   await desktop.unmount()
 
   const terminal = await $.ui.mount({ plugin: 'token-maaler', surface: 'terminal', component: 'AbovePrompt', props: baandProps } as never)
-  expect(await terminal.find({ type: 'Text', text: /^\s*5 t ██░+ 23 %/ })).toBeDefined()
+  expect(await terminal.find({ type: 'Text', text: /^5 t █+░+ +23 %/ })).toBeDefined()
   expect(await terminal.find({ type: 'Svg' })).toBeUndefined()
   await terminal.unmount()
 
