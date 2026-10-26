@@ -64,10 +64,13 @@ export const opgaveMaal = (usd: number): string => [af5t(usd), afUgen(usd), kr(u
 // Forbruget i beskeden efter en opgave: andel af 5-timersgrænsen, ellers kroner.
 export const graenseForbrug = (usd: number): string => af5t(usd) ?? kr(usd)
 
-// "<1 min", "12 min", "1 t 5 min".
-export const minutter = (sekunder: number): string => {
-  const m = Math.round(sekunder / 60)
-  return sekunder < 60 ? '<1 min' : m < 60 ? `${m} min` : `${Math.floor(m / 60)} t${m % 60 ? ` ${m % 60} min` : ''}`
+// "05:07": minutter og sekunder.
+export const mmss = (sekunder: number): string => `${String(Math.floor(sekunder / 60)).padStart(2, '0')}:${String(Math.round(sekunder) % 60).padStart(2, '0')}`
+
+// Hvad en opgave kostede, til beskeden: andel af 5-timersbudgettet, ellers kroner.
+export const budgetTekst = (usd: number): string => {
+  const p = pct5t(usd)
+  return p === null ? kr(usd) : `${pct(p)} af dit 5 timers budget`
 }
 
 // Hvad tallene i rådene betyder.

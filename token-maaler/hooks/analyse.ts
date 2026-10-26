@@ -367,10 +367,6 @@ export const analyser = (r: Raadata): Opgave => {
   }
 }
 
-// En opgave på få ord, til båndet og beskeden: andelen af 5-timersgrænsen, ellers kroner eller tokens.
-export const opsummering = (o: Pick<Opgave, 'usd' | 'ind' | 'ud'>): string =>
-  o.usd !== null ? graenseForbrug(o.usd) : `${fmt(o.ind + o.ud)} tokens`
-
 const beskriv = (p: Post): string => {
   switch (p.type) {
     case 'start':

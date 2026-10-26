@@ -95,7 +95,7 @@ test('en live-målt opgave giver en besked, og båndet har hverken knapper eller
   usd = 1.3
   await $.turn.complete({ answer: 'Færdig.', durationMs: 12_000, isAborted: false, turnId: 't1', reason: 'answer' } as never)
 
-  expect(toasts).toEqual([expect.stringMatching(/^Opgaven brugte 1,95 kr · (<1|\d+) min$/)])
+  expect(toasts).toEqual([expect.stringMatching(/^Find og læs den store fil kostede 1,95 kr\. Den tog 00:12\.$/)])
 
   // Uden målte grænser og uden kontekst er der intet at tegne, og båndet har aldrig knapper eller sætninger.
   for (const surface of ['terminal', 'desktop'] as const) {
@@ -144,8 +144,8 @@ test('båndet er kun bjælker med titler over hele bredden, og den sidste opgave
   expect(await desktop.find({ type: 'Text' })).toBeUndefined()
   const kilde = String(tegninger[0]?.props.source)
   // 120 tegn gange 9 pixel; titlerne og procenterne står i tegningen, og kun 5-timersbjælken har stykket.
-  expect(kilde).toContain('width="1080" height="12"')
-  for (const tekst of ['Kontekst', '5 t', 'Uge', '31 %', '23 %', '8 %']) expect(kilde).toContain(`>${tekst}</text>`)
+  expect(kilde).toContain('width="1080" height="10"')
+  for (const tekst of ['Kontekst', '5 t', 'Uge']) expect(kilde).toContain(`>${tekst}</text>`)
   expect(kilde.match(/<g clip-path=/g)).toHaveLength(1)
   await desktop.unmount()
 
@@ -547,7 +547,6 @@ test('båndet viser 5-timersgrænsen og ugens grænse som målere: en graf på d
   // Bjælkerne er én tegning i fast højde, uden fast bredde og uden ramme om en interaktiv tegning, med procenten på hver.
   const tegninger = await desktop.findAll({ type: 'Svg' })
   expect(tegninger.map(b => [b.props.width, b.props.height, b.props.isInteractive, b.props.alt])).toEqual([[undefined, undefined, undefined, '5 t 23 %; Uge 8 %']])
-  expect(String(tegninger[0]?.props.source)).toContain('>23 %</text>')
   expect(await desktop.find({ type: 'Text', text: /^23 %$/ })).toBeUndefined()
   await desktop.unmount()
 

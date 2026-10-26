@@ -66,7 +66,7 @@ export type Bjaelke = { navn: string; p: number; sidste: number }
 export const kortNavn = (g: Graense): string => NAVN[g.kind]?.kort ?? g.kind
 
 // Titlens plads i pixel i skriftstørrelse 12, med lidt luft til bjælken.
-const titelBredde = (navn: string) => Math.ceil(navn.length * 6.1) + 8
+const titelBredde = (navn: string) => Math.ceil(navn.length * 5 + 8)
 
 const MELLEM = 24
 
@@ -84,17 +84,16 @@ export const baandSvg = (bjaelker: readonly Bjaelke[], bredde: number): Tegning 
     const m = b.sidste > 0 && w > 0 ? Math.min(w, Math.max(3, (Math.min(100, b.sidste) / 100) * bw)) : 0
     const id = `m${i}`
     return [
-      `<text x="${tx.toFixed(1)}" y="9.5" fill="${TEKST}" font-size="11" ${SKRIFT}>${xml(b.navn)}</text>`,
+      `<text x="${tx.toFixed(1)}" y="8" fill="${TEKST}" font-size="9" ${SKRIFT}>${xml(b.navn)}</text>`,
       // Et mørkere spor end i panelet, så den hvide procent kan læses på lys og mørk baggrund.
-      `<rect x="${bx.toFixed(1)}" y="1" width="${bw.toFixed(1)}" height="10" rx="5" fill="rgba(110,110,110,0.55)"/>`,
-      `<rect x="${bx.toFixed(1)}" y="1" width="${w.toFixed(1)}" height="10" rx="5" fill="${fyld(b.p)}"/>`,
+      `<rect x="${bx.toFixed(1)}" y="2.5" width="${bw.toFixed(1)}" height="5" rx="2.5" fill="rgba(110,110,110,0.55)"/>`,
+      `<rect x="${bx.toFixed(1)}" y="2.5" width="${w.toFixed(1)}" height="5" rx="2.5" fill="${fyld(b.p)}"/>`,
       m > 0
-        ? `<clipPath id="${id}"><rect x="${bx.toFixed(1)}" y="1" width="${w.toFixed(1)}" height="10" rx="5"/></clipPath><g clip-path="url(#${id})"><rect x="${(bx + w - m).toFixed(1)}" y="1" width="${m.toFixed(1)}" height="10" fill="#000000" fill-opacity="0.25"/><rect x="${(bx + w - m - 0.75).toFixed(1)}" y="1" width="1.5" height="10" fill="#000000" fill-opacity="0.55"/></g>`
+        ? `<clipPath id="${id}"><rect x="${bx.toFixed(1)}" y="2.5" width="${w.toFixed(1)}" height="5" rx="2.5"/></clipPath><g clip-path="url(#${id})"><rect x="${(bx + w - m).toFixed(1)}" y="2.5" width="${m.toFixed(1)}" height="5" fill="#000000" fill-opacity="0.25"/><rect x="${(bx + w - m - 0.5).toFixed(1)}" y="2.5" width="1" height="5" fill="#000000" fill-opacity="0.55"/></g>`
         : '',
-      `<text x="${(bx + bw / 2).toFixed(1)}" y="8.6" text-anchor="middle" fill="#ffffff" stroke="rgba(0,0,0,0.3)" stroke-width="1.5" paint-order="stroke" font-size="8.5" font-weight="500" ${SKRIFT}>${pct(b.p)}</text>`,
     ].join('')
   })
-  return svg(Math.ceil(x - MELLEM), 12, dele.join(''))
+  return svg(Math.ceil(x - MELLEM), 10, dele.join(''))
 }
 
 // Hvad båndet siger til en læser, der ikke kan se det.
