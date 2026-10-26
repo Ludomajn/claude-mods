@@ -95,7 +95,7 @@ test('en live-målt opgave giver en besked, og båndet har hverken knapper eller
   usd = 1.3
   await $.turn.complete({ answer: 'Færdig.', durationMs: 12_000, isAborted: false, turnId: 't1', reason: 'answer' } as never)
 
-  expect(toasts).toEqual([expect.stringMatching(/^Find og læs den store fil kostede 1,95 kr\. Den tog 00:12\.$/)])
+  expect(toasts).toEqual([expect.stringMatching(/^Opgaven tog 00 min 12 sekunder at udføre\.$/)])
 
   // Uden målte grænser og uden kontekst er der intet at tegne, og båndet har aldrig knapper eller sætninger.
   for (const surface of ['terminal', 'desktop'] as const) {

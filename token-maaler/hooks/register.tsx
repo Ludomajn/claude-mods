@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { ForbrugGrafik, Graense, KontekstDel } from '../types'
-import { afkort, analyser, etiket, fmt, kontekstDele } from './analyse'
+import { afkort, analyser, etiket, kontekstDele } from './analyse'
 import type { Agent, Kald, Trin } from './analyse'
 import { analyserAndet, kodeForbrug, proeverFra, referencePrProcent, vinduer } from './andet'
 import type { Andet, Proeve } from './andet'
@@ -10,7 +10,7 @@ import { beskrivelsesPrompt, dagTekst, dageTekst, datoNoegle, datoTekst, laesLin
 import type { HistOpgave, Kilde, Projekt, Samling } from './historik'
 import { alleSamtalerTekst, godeRaadTekst, indsigtTekst, MINDST_ANDET, ugedage, ugensSamtalerTekst } from './indsigt'
 import type { Resume } from './indsigt'
-import { KVARTER, budgetTekst, maalKr, median, mmss, pct5t, saetEnhed, stoerst, ugeEnhed, VINDUER } from './enhed'
+import { KVARTER, maalKr, median, pct5t, saetEnhed, stoerst, ugeEnhed, VINDUER } from './enhed'
 import { baandAlt, baandSvg, baandTekst, brugt, kortNavn, maalerSvgStor, maalerTekst, soejlerSvg, soejlerTekst, vistGraenser } from './grafik'
 import type { Bjaelke } from './grafik'
 import type { Maaling } from './enhed'
@@ -986,7 +986,7 @@ export const register: Register = (on, options) => {
       await update($, opgaver, liste => [...liste, opgave].slice(-50))
       if (indstillinger.beskeder) {
         await sikrEnhed($)
-        $.ui.toast(`${opgave.prompt} ${opgave.usd === null ? `brugte ${fmt(opgave.ind + opgave.ud)} tokens` : `kostede ${budgetTekst(opgave.usd)}`}. Den tog ${mmss(opgave.sekunder)}.`)
+        $.ui.toast(`Opgaven tog ${String(Math.floor(opgave.sekunder / 60)).padStart(2, '0')} min ${String(opgave.sekunder % 60).padStart(2, '0')} sekunder at udføre.`)
       }
     } catch {
       // En fejl i analysen må ikke stoppe turen.
