@@ -43,7 +43,7 @@ const forbrugGrafik = atom({ plugin: 'token-maaler', key: 'forbrugGrafik' } as c
 
 const PANE = 'token-maaler'
 // Pixel pr. tegn i appens kodeskrift, til at gøre båndets tegning så bred som båndet.
-const PX_PR_KOLONNE = 7.5
+const PX_PR_KOLONNE = 9
 const HISTORIK_VAERKTOEJ = 'mcp__token-maaler__historik'
 const FIRE_MB = 4 * 1024 * 1024
 // Hver samtales resume i $.store; hæv versionen, når reglerne eller resumeet ændres.
