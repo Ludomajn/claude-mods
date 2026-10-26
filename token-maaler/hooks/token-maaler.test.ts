@@ -143,8 +143,8 @@ test('båndet er kun bjælker med titler over hele bredden, og den sidste opgave
   expect(await desktop.find({ type: 'Button' })).toBeUndefined()
   expect(await desktop.find({ type: 'Text' })).toBeUndefined()
   const kilde = String(tegninger[0]?.props.source)
-  // højst 440 pixel; titlerne og procenterne står i tegningen, og kun 5-timersbjælken har stykket.
-  expect(kilde).toContain('width="440" height="10"')
+  // 120 tegn gange 9 pixel; titlerne og procenterne står i tegningen, og kun 5-timersbjælken har stykket.
+  expect(kilde).toContain('width="1080" height="14"')
   for (const tekst of ['Kontekst', '5 t', 'Uge']) expect(kilde).toContain(`>${tekst}</text>`)
   expect(kilde.match(/<g clip-path=/g)).toHaveLength(1)
   await desktop.unmount()

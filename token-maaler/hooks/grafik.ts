@@ -66,34 +66,42 @@ export type Bjaelke = { navn: string; p: number; sidste: number }
 export const kortNavn = (g: Graense): string => NAVN[g.kind]?.kort ?? g.kind
 
 // Titlens plads i pixel i skriftstørrelse 12, med lidt luft til bjælken.
-const titelBredde = (navn: string) => Math.ceil(navn.length * 5 + 8)
+const titelBredde = (navn: string) => Math.ceil(navn.length * 5.6 + 8)
 
 const MELLEM = 24
+const KANT = 20
+const BJAELKE_BREDDE = 110
+const H = 8
 
-// Hele båndet som én tegning, lige så bred som `bredde` pixel: bjælker med titler, lige lange, med procenten
-// skrevet på hver. Den sidste opgave er et mørkere stykke yderst på den udfyldte del med en streg, hvor
-// opgaven begyndte (mørkt, så den hvide procent kan læses). Stykket klippes til bjælkens runde ende.
+// Hele båndet som én tegning, `bredde` pixel bred med 20 pixel luft i siderne: Kontekst til venstre, de
+// andre grænser til højre, hver en titel og en bjælke. Den sidste opgave er et mørkere stykke yderst på
+// den udfyldte del med en streg, hvor opgaven begyndte. Stykket klippes til bjælkens runde ende.
 export const baandSvg = (bjaelker: readonly Bjaelke[], bredde: number): Tegning => {
-  const bw = Math.max(40, (bredde - (bjaelker.length - 1) * MELLEM - bjaelker.reduce((n, b) => n + titelBredde(b.navn), 0)) / Math.max(1, bjaelker.length))
-  let x = 0
-  const dele = bjaelker.map((b, i) => {
-    const bx = x + titelBredde(b.navn)
+  const venstre = bjaelker.filter(b => b.navn === 'Kontekst')
+  const hoejre = bjaelker.filter(b => b.navn !== 'Kontekst')
+  const blok = (b: Bjaelke) => titelBredde(b.navn) + BJAELKE_BREDDE
+  const samlet = (l: readonly Bjaelke[]) => l.reduce((n, b) => n + blok(b), 0) + Math.max(0, l.length - 1) * MELLEM
+  const total = Math.max(bredde, samlet(venstre) + samlet(hoejre) + (venstre.length && hoejre.length ? MELLEM : 0) + 2 * KANT)
+  let x = KANT
+  const dele = [...venstre, ...hoejre].map((b, i) => {
+    if (i === venstre.length) x = total - KANT - samlet(hoejre)
     const tx = x
-    x = bx + bw + MELLEM
-    const w = Math.max(b.p > 0 ? 4 : 0, (Math.min(100, b.p) / 100) * bw)
-    const m = b.sidste > 0 && w > 0 ? Math.min(w, Math.max(3, (Math.min(100, b.sidste) / 100) * bw)) : 0
+    const bx = x + titelBredde(b.navn)
+    x = bx + BJAELKE_BREDDE + MELLEM
+    const w = Math.max(b.p > 0 ? 4 : 0, (Math.min(100, b.p) / 100) * BJAELKE_BREDDE)
+    const m = b.sidste > 0 && w > 0 ? Math.min(w, Math.max(3, (Math.min(100, b.sidste) / 100) * BJAELKE_BREDDE)) : 0
     const id = `m${i}`
+    const r = (xx: number, ww: number, fill: string, extra = '') => `<rect x="${xx.toFixed(1)}" y="3" width="${ww.toFixed(1)}" height="${H}" ${extra}fill="${fill}"/>`
     return [
-      `<text x="${tx.toFixed(1)}" y="8" fill="${TEKST}" font-size="9" ${SKRIFT}>${xml(b.navn)}</text>`,
-      // Et mørkere spor end i panelet, så den hvide procent kan læses på lys og mørk baggrund.
-      `<rect x="${bx.toFixed(1)}" y="2.5" width="${bw.toFixed(1)}" height="5" rx="2.5" fill="rgba(110,110,110,0.55)"/>`,
-      `<rect x="${bx.toFixed(1)}" y="2.5" width="${w.toFixed(1)}" height="5" rx="2.5" fill="${fyld(b.p)}"/>`,
+      `<text x="${tx.toFixed(1)}" y="${H + 2}" fill="${TEKST}" font-size="10" ${SKRIFT}>${xml(b.navn)}</text>`,
+      r(bx, BJAELKE_BREDDE, 'rgba(110,110,110,0.55)', `rx="${H / 2}" `),
+      r(bx, w, fyld(b.p), `rx="${H / 2}" `),
       m > 0
-        ? `<clipPath id="${id}"><rect x="${bx.toFixed(1)}" y="2.5" width="${w.toFixed(1)}" height="5" rx="2.5"/></clipPath><g clip-path="url(#${id})"><rect x="${(bx + w - m).toFixed(1)}" y="2.5" width="${m.toFixed(1)}" height="5" fill="#000000" fill-opacity="0.25"/><rect x="${(bx + w - m - 0.5).toFixed(1)}" y="2.5" width="1" height="5" fill="#000000" fill-opacity="0.55"/></g>`
+        ? `<clipPath id="${id}">${r(bx, w, '#000', `rx="${H / 2}" `)}</clipPath><g clip-path="url(#${id})">${r(bx + w - m, m, '#000000" fill-opacity="0.25')}${r(bx + w - m - 0.5, 1, '#000000" fill-opacity="0.55')}</g>`
         : '',
     ].join('')
   })
-  return svg(Math.ceil(x - MELLEM), 10, dele.join(''))
+  return svg(Math.ceil(total), H + 6, dele.join(''))
 }
 
 // Hvad båndet siger til en læser, der ikke kan se det.

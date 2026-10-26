@@ -42,8 +42,7 @@ const kontekst = atom({ plugin: 'token-maaler', key: 'kontekst' } as const, null
 const forbrugGrafik = atom({ plugin: 'token-maaler', key: 'forbrugGrafik' } as const, null)
 
 const PANE = 'token-maaler'
-// Båndets tegning er højst så bred; er der mindre plads, tegnes den smallere.
-const BAAND_BREDDE = 440
+// Pixel pr. tegn i appens kodeskrift, til at gøre båndets tegning så bred som båndet.
 const PX_PR_KOLONNE = 9
 const HISTORIK_VAERKTOEJ = 'mcp__token-maaler__historik'
 const FIRE_MB = 4 * 1024 * 1024
@@ -1046,7 +1045,7 @@ export const register: Register = (on, options) => {
     if (bjaelker.length === 0 || !(sidste ? indstillinger.baand : indstillinger.velkomst)) return next(e)
     // Tegningen får bredden i tegn gange en gennemsnitlig tegnbredde; er der mindre plads, skalerer appen den ned.
     return 'Svg' in el && e.surface !== 'terminal' ? (
-      <el.Svg source={baandSvg(bjaelker, Math.min(BAAND_BREDDE, Math.round(e.props.bodyColumns * PX_PR_KOLONNE))).source} alt={baandAlt(bjaelker)} />
+      <el.Svg source={baandSvg(bjaelker, Math.round(e.props.bodyColumns * PX_PR_KOLONNE)).source} alt={baandAlt(bjaelker)} />
     ) : (
       <el.Text dimColor>{baandTekst(bjaelker, e.props.bodyColumns)}</el.Text>
     )
