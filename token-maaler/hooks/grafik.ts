@@ -66,7 +66,7 @@ export type Bjaelke = { navn: string; p: number; sidste: number }
 export const kortNavn = (g: Graense): string => NAVN[g.kind]?.kort ?? g.kind
 
 // Titlens plads i pixel i skriftstørrelse 12, med lidt luft til bjælken.
-const titelBredde = (navn: string) => Math.ceil(navn.length * 5.6 + 8)
+const titelBredde = (navn: string) => Math.ceil(navn.length * 7.4 + 8)
 
 const MELLEM = 24
 const KANT = 20
@@ -91,9 +91,9 @@ export const baandSvg = (bjaelker: readonly Bjaelke[], bredde: number): Tegning 
     const w = Math.max(b.p > 0 ? 4 : 0, (Math.min(100, b.p) / 100) * BJAELKE_BREDDE)
     const m = b.sidste > 0 && w > 0 ? Math.min(w, Math.max(3, (Math.min(100, b.sidste) / 100) * BJAELKE_BREDDE)) : 0
     const id = `m${i}`
-    const r = (xx: number, ww: number, fill: string, extra = '') => `<rect x="${xx.toFixed(1)}" y="3" width="${ww.toFixed(1)}" height="${H}" ${extra}fill="${fill}"/>`
+    const r = (xx: number, ww: number, fill: string, extra = '') => `<rect x="${xx.toFixed(1)}" y="5" width="${ww.toFixed(1)}" height="${H}" ${extra}fill="${fill}"/>`
     return [
-      `<text x="${tx.toFixed(1)}" y="${H + 2}" fill="${TEKST}" font-size="10" ${SKRIFT}>${xml(b.navn)}</text>`,
+      `<text x="${tx.toFixed(1)}" y="13" fill="${TEKST}" font-size="13" font-weight="500" ${SKRIFT}>${xml(b.navn)}</text>`,
       r(bx, BJAELKE_BREDDE, 'rgba(110,110,110,0.55)', `rx="${H / 2}" `),
       r(bx, w, fyld(b.p), `rx="${H / 2}" `),
       m > 0
@@ -101,7 +101,7 @@ export const baandSvg = (bjaelker: readonly Bjaelke[], bredde: number): Tegning 
         : '',
     ].join('')
   })
-  return svg(Math.ceil(total), H + 6, dele.join(''))
+  return svg(Math.ceil(total), 18, dele.join(''))
 }
 
 // Hvad båndet siger til en læser, der ikke kan se det.
